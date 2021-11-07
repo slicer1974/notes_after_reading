@@ -1,0 +1,2 @@
+Запуск сервисов  - systemctl start <servicename>
+Запуск firefox с выбором профиля - firefox -P
