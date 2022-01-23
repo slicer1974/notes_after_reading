@@ -1,0 +1,173 @@
+	__CDS Object__– обобщенное понятие объекта репозитория, создаваемого через исходный код CDS.  К CDS Object относятся либо __CDS Entity (DDL)__, либо __CDS Role (DCL)__. Найти все DDL в системе можно через таблицу TADIR по следующим ключам: R3TR DDLS <DDL SourceName>. Все DCL можно найти в TADIR по ключам: R3TR DCLS <DCL SourceName>.
+    	__CDS Entity__ – это CDS объект, управляемый ABAP словарём, создаваемый путём описания на специальном языке — __Data Defenition Language (DDL)__. Объект не переносится транспортом, вместо этого он генерируется в системе во время активации исходного кода DDL с которым он связан. Хранится такой объект в TADIR с ключом: R3TR STOB <EntityName>, где STOB – Structured object. 
+В ABAP 7.4. к CDS Entity относится лишь __CDS View__, в 7.5. добавили еще CDS Table function (по сути это AMDP, которая реализует CDS и позволяет использовать SQL Script для формирования данных CDS, в статье Table function не рассматриваются). __CDS View — это основной объект с которым мы имеем дело в ABAP при чтении данных из словаря.__ На CDS View можно ссылаться при объявлении ABAP переменных, однако этот объект нельзя использовать при описании словарных объектов. Каждая новая CDS View должна быть описана в отдельном DDL объекте.  Имя CDS View определяется сразу после ключевого слова DEFINE VIEW в DDL, рекомендуется использовать имя такое же как у DDL объекта. Создаются они на базе существующих источников данных из словаря – таблиц (поддерживаются только прозрачные таблицы, пул таблиц и кластерные таблицы не поддерживаются), классических словарных вьюшек и других CDS. CDS Entity не доступны из Native SQL, а OpenSQL поддерживает только операции чтения.
+Пример __CDS_View__:
+#define view Zddl_sample as select from data_source_name {
+#}
+   	 __CDS Role__ – объекты описывающие необходимые проверки полномочий для доступа к CDS View. CDS Role создаются путём их описания в DCL (Data control language) объекте.
+    	__CDS Database View__ – объект словаря, который как и CDS View генерируется во время активации DDL объекта. Объект в TADIR можно найти по ключу: R3TR VIEW. По сути, это классический read-only database view из словаря. Имя CDS DB View указывается через аннотацию — __@AbapCatalog.sqlViewName__, а текстовое описание через __@EndUserText.label__. Просмотреть данное view можно через SE11, но отредактировать только в ADT. В ABAP можно считать данные напрямую из CDS DB View, однако это не рекомендуется делать и данный способ уже считается устаревшим в ABAP 7.5. __В отличие от CDS VIew, CDS DB View можно использовать при описании объектов словаря.__
+	__Аннотации__ это своего рода мета-информация об объекте CDS, которая может в себя включать как __настройки__ (буферизация, ссылочные поля для валюты и т.п.), так и только описательные данные (текстовое описание поля, описание DB View и прочее).
+	Создать CDS View можно только из ABAP Development Tools:
+1. Создать проект ABAP в системе
+2. Добавить объект DDL Source
+3. Указать имя объекта и транспорт
+4. Выбрать шаблон CDS
+
+В SAP GUI можно помотреть получившийся CDS SE11--Утилиты--Объект базы данных
+
+#####################################
+__CDS View__
+#####################################
+
+CDS View содержат __два типа определения ключей__:
+1. Для CDS Entity, ключевое слово KEY может задать __семантический ключ__. Который используется при неявных проверках полномочий определенных в DCL (ABAP 7.5).
+2. Ключ для CDS DB View задаётся автоматически по тем же правилам что и для обычных словарных View, данный ключ является __техническим__
+
+	__Буферизация__ для CDS View работает по тем же правилам, что и для DB View. Буферизация CDS View возможна только в том случае, если среди источников данных нет других view (DB View или CDS View).
+Настройка буферизации осуществляется через следующие аннотации:
+__AbapCatalog.buffering.status__ – определяет, активна или нет буферизация, возможные значения:
+    #ACTIVE: Буферизация активна.
+    #SWITCHED_OFF: Буферизация возможна, но неактивна (по умолчанию).
+    #NOT_ALLOWED: Буферизация запрещена.
+
+__AbapCatalog.buffering.type__ – определяет тип буферизации, возможные значения:
+    #SINGLE: Отдельная запись
+    #GENERIC: Родовая область
+    #FULL: Полная буферизация
+    #NONE: Буферизация отключена (По умолчанию)
+
+__AbapCatalog.buffering.numberOfKeyFields__ – количество ключевых полей, относительно которых происходит буферизация, только для буферизации по родовой области (Generic). Может принимать значения от 0 до k-1, где k – количество ключевых полей. Для буферизации всегда будет актуальным технический ключ (который можно посмотреть в SE11 к DB View).
+
+#######
+__СИНТАКСИС ОПРЕДЕЛЕНИЯ:__
+#######
+
+#[DEFINE] VIEW cds_entity [ name_list] [ parameter_list] AS select_statement [;]
+где:
+__name_list__ - список имен для присвоения из select  - указывается в круглых скобках перед as - необязательный:
+#@AbapCatalog.sqlViewName: 'BPA_VW'
+#define view business_partner
+#  (id, role, company_name, phone_number) as
+#  select from snwd_bpa
+#         { key snwd_bpa.bp_id,
+#               snwd_bpa.bp_role,
+#               snwd_bpa.company_name,
+#               snwd_bpa.phone_number }
+
+__parameter_list__ - список передаваемых в CDS параметров. Указывается после ключевого слова __with parameters__. В теле запроса указываются, используя синтаксис  __:pname__ или __$parameters.pname__. Необязательный.
+#@AbapCatalog.sqlViewName: 'DEMO_CDS_PARA'
+#@AccessControl.authorizationCheck: #NOT_REQUIRED
+#define view demo_cds_parameters
+#  with parameters  p_unit:S_DISTID
+#  as select from spfli          
+#            { key carrid,
+#             key connid,
+#                  distid }
+#            where distid = :p_unit;
+SQL запрос к CDS View с параметром:
+#SELECT * FROM zddl_assoc_cds( p_carrid = 'UA' ) INTO TABLE @DATA(lt_data).
+
+__select_statement__ - собственно запрос. Обязательный.
+
+	__Синтаксис запроса:__
+#SELECT [DISTINCT] { select_list
+#                    FROM data_source
+#                    [association1 association2 ...] }
+#                | { FROM data_source
+#                    [ association1 association2 ...]
+#                    {select_list} }
+#                  [clauses]
+где:
+__select_list__ - список элементов запроса. Указывается в фигурных скобках. В простом варианте - *. Для полей из списка можно использовать аннотации, начинающиеся с __@__
+#@AbapCatalog.sqlViewName: 'BPA_VW'
+#define view business_partner as
+#select from snwd_bpa as partner
+#    { key partner.bp_id,
+#       partner.company_name,
+#       @EndUserText.label: 'Corporation Role'
+#       @EndUserText.quickInfo: 'Customer or supplier' 
+#       partner.bp_role } 
+В списке элементов могут быть использованы переменные сессии user, client(mandant) и язык системы:
+#@AbapCatalog.sqlViewName: 'DEMO_CDS_SESSVAR'
+#@AccessControl.authorizationCheck: #NOT_REQUIRED
+#define view demo_cds_session_variables
+#   as
+#   select
+#     from demo_expressions
+#       { id,
+#         $session.user            as system_user,
+#         $session.client          as system_client,
+#         $session.system_language as system_language    
+#        } 
+
+__association__ -  аналоги JOIN. 
+#.. ASSOCIATION [ [min..max] ] TO target [AS _assoc] ON cond_exp ...
+В квадратных скобках указывается кардинальность в виде min..max из (положительные целые,*), где min не может быть * и max не может быть 0. 
+После ключевого слова __to__ указывается связный объект - таблица или view. 
+После ключевого слова __as__ указывается алиас - рекомендуется начинать алиас ассоциации с подчеркивания. 
+После ключевого слова __on__ указывается отношение связи. Префикс __$projection__ используется для указания источника связи. 
+#@AbapCatalog.sqlViewName: 'DEMO_CDS_ASSOC'
+#@AccessControl.authorizationCheck: #NOT_REQUIRED
+#define view demo_cds_association
+#  (_spfli_scarr, id, carrier, flight, departure, destination )
+#  as select from spfli
+#            association [1..1] to scarr as _spfli_scarr
+#              on $projection.carrid = _spfli_scarr.carrid
+#     { _spfli_scarr,
+#       key spfli.carrid,
+#       key _spfli_scarr.carrname, 
+#       spfli.cityto } 
+Используя ассоциации можно указывать условие фильтрации в квадратных скобках
+#define view Zddl_assoc_cds as select from Zddl_assoc_Sample {
+#  cityfrom,
+#  countryfr,
+#  geoinfo[1: inner where country = 'UA'].latitude
+#};
+
+__data_source__ - источник данных для запроса
+#... entity[ parameters]| path_expr [[AS] alias] [ join] ...
+
+__clauses__ - условия и операции запроса
+#[WHERE cond_expr]
+#[GROUP BY field1, field2, ...]
+#[HAVING cond_expr]
+#[UNION [ALL] SELECT ...]
+Кроме того могут использоваться выражения-фильтры в квадратных скобках
+
+#####################################
+__CDS Role__
+#####################################
+
+Аннотация AccessControl.authorizationCheck при описании CDS View обозначает необходимость проверки полномочий при работе с CDS View. Варианты:
+#CHECK:
+If Open SQL is used to access the view, access control is performed implicitly if a CDS role is assigned to the view. If there is no role for the view, a syntax check warning occurs.
+#NOT_REQUIRED:
+Like #CHECK, but there is no syntax check warning.
+#NOT_ALLOWED:
+No access control is performed. This produces a syntax check warning in the DCL source code of a role for the view.
+
+Синтаксис:
+#@MappingRole: true
+#[@role_annot1]
+#[@role_annot2]
+#...
+#[DEFINE] ROLE role_name {
+#   GRANT SELECT ON cds_entity WHERE condition [AND|OR condition] ...;
+#  [GRANT SELECT ON cds_entity ...;]
+#    ... }
+
+Специальный параметр __ASPECT pfcg_auth__ joins the elements of the CDS entity specified on the left side of the operator = with the authorizations specified on the right side (and granted using the classical role editor (transaction PFCG). 
+Пример:
+#     @MappingRole: true
+#    define role demo_cds_role_lit_pfcg {
+#      grant select on demo_cds_auth_lit_pfcg
+#      where (carrid) =
+#      aspect pfcg_auth (s_carrid, carrid, actvt='03') and
+#             currcode = 'EUR'; } 
+где
+s_carrid - объект полномочий
+carrid - поле полномочий
+actvt- проверяемые полномочия
+Поле currcode ограничивается непосредственно по значению без проверки полномочий.
+
+

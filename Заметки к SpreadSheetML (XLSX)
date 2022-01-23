@@ -1,0 +1,261 @@
+__Книга:__
+<workbook . . .>
+. . .
+<workbookPr . . ./>
+<sheets>
+<sheet name="sheet1" r:id="rId1">
+<sheet name="sheet2" r:id="rId2">
+<sheet name="sheet3" r:id="rId3">
+</sheets>
+. . .
+</workbook>
+
+__Лист__:
+<worksheet . . .>
+. . .
+<cols>
+<col min="1" max="1" width="26.140625" customWidth="1"/>
+. . .
+</cols>
+<sheetData>
+<row r="1">
+<c r="A1" s="1" t="s">
+<v>0</v>
+. . .
+</c>
+</row>
+. . .
+</sheetData>
+. . .
+<mergeCells count="1">
+<mergeCell ref="B12:J16"/>
+</mergeCells>
+<pageMargins . . ./>
+<pageSetup . . ./>
+<tableParts ccount="1">
+<tableParts count="1">
+</tablePart r:id="rId2"/>
+</worksheet>
+
+__Тег </sheetViews>__. Необязателен, но иногда полезен. Я его использовал для указания на необходимость закрепления верхней строки: это полезно для больших отчетов. Выглядит это примерно так:
+<sheetViews>
+	<sheetView tabSelected="1" workbookViewId="0">
+		<pane ySplit="1" topLeftCell="A2" activePane="bottomRight" state="frozen"/>
+	</sheetView>
+</sheetViews>
+Собственно закрепление строки — тег <pane />. И вот какие здесь использованы атрибуты:
+*	ySplit — показывает количество закрепленных строк. Для закрепления столбцов есть аналогичный атрибут xSplit;
+*	topLeftCell — указание левой верхней ячейки видимой по умолчанию НЕзакрепленной области;
+*	activePane — указание местонахождения НЕзакрепленной области. В руководствах сказано, что этот атрибут регулирует, с какой стороны будет НЕзакрепленная область. Правда, попробовав разные значения, я почему-то получил одинаковый результат. Как вариант «by default» я для себя выбрал bottomRight;
+*	state — указатель состояния закрепленной области. Для простого закрепления строки используется значение frozen
+
+__Тег </cols>__. Помогает установить ширину столбцов отличную от дефолтной. В заполненном виде выглядит примерно так:
+<cols>
+	<col min="1" max="2" width="9" customWidth="1"/>
+	<col min="3" max="4" width="16" customWidth="1"/>
+	<col min="5" max="6" width="66" customWidth="1"/>
+	<col min="7" max="8" width="42" customWidth="1"/>
+</cols>
+*	Атрибут min — первый столбец группы;
+*	Атрибут max — последний столбец группы;
+*	Атрибут width — ширина столбца из группы;
+*	Атрибут customWidth — флаг применения кастомной ширины, без него ширина все равно будет дефолтной;
+
+__Тег <sheetData>__ — это, собственно, зона, где хранится содержимое ячеек, или, в зависимости от типа, ссылок на него. В среднем выглядит он так:
+<sheetData>
+	<row r="1">
+		<c r="A1" s="3" t="s"><v>0</v></c>
+		<c r="B1" s="3" t="s"><v>1</v></c>
+		<c r="C1" s="3" t="s"><v>2</v></c>
+	</row>
+</sheetData>
+
+__Ячейки__:
+Each cell specifies its type with the t attribute. Possible values include:
+    b for boolean
+    d for date
+    e for error
+    inlineStr for an inline string (i.e., not stored in the shared strings part, but directly in the cell)
+    n for number
+    s for shared string (so stored in the shared strings part and not in the cell)
+    str for a formula (a string representing the formula)
+When a cell is a number, then the value is stored in the <v> element as a child of <c> (the cell element). 
+<c r="B2" s="5" t="n">
+<v>400</v>
+</c>
+A date is the same, though the date is stored as a value in the ISO 8601 format. For inline strings, the value is within an <is> element. But of course the actual text is further nested within a t since the text can be formatted.
+<c r="C4" s="2" t="inlineStr">
+<is>
+<t>my string</t>
+</is>
+</c>
+When the data type of the cell is s for shared string, then the string is stored in the shared strings part. However, the cell still contains a value within a <v> element, and that value is the index (zero-based) of the stored string in the shared strings part. So, for example, in the example below, the actual string is the 9th occurrence of the <si> element within the shared strings part.
+<c r="C1" s="4" t="s">
+<v>8</v>
+</c>
+The shared string part may look like this:
+<sst xmls="http://schemas.openmlformats.org/spreadsheetml/2006/main" count="19" uniqueCount="13">
+<si><t>Expenses</t></si>
+<si><t>Amount</t></si>
+<si><t>Food</t></si>
+. . .
+</sst>
+
+Замечание про inline строки — их вполне можно вставлять :) Правда хватает на один раз, при сохранении этого файла Excel-ем, он сконвертнет все в sharedstring. Но для вывода из какой-нибудь другой системы это реально проще, чем справочники делать.
+
+__Настройки страницы для печати__
+<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+<pageSetup paperSize="9" orientation="portrait" r:id="rId1"/>
+
+###################################################3
+
+__Форматирование__:
+<stylesheet xmls="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts/>
+<fonts/>
+<fills/>
+<borders/>
+<cellStyleXfs/>
+<cellXfs/>
+<cellStyles/>
+<dxfs/>
+<tableStyles/>
+</stylesheet>
+
+__Пример заполнения fonts(шрифты)__:
+<fonts count="2" x14ac:knownFonts="1">
+	<font>
+		<sz val="11"/>
+		<color theme="1"/>
+		<name val="Calibri"/>
+		<family val="2"/>
+		<scheme val="minor"/>
+	</font>
+	<font>
+		<b/>
+		<sz val="11"/>
+		<color theme="1"/>
+		<name val="Calibri"/>
+		<family val="2"/>
+		<charset val="204"/>
+		<scheme val="minor"/>
+	</font>
+</fonts>
+
+__Пример заполнения fills(заливки)__:
+<fills count="5">
+<fill>
+<patternFill patternType="none"/>
+</fill>
+<fill>
+<patternFill patternType="gray125"/>
+</fill>
+<fill>
+<patternFill patternType="solid">
+<fgColor rgb="FFFFEB9C"/>
+</patternFill/>
+</fill>
+<fill>
+<patternFill patternType="solid">
+<fgColor theme="5" tint="0.39997558519241921"/>
+<bgColor indexed="65"/>
+</patternFill/>
+</fill>
+<fill>
+<patternFill patternType="solid">
+<fgColor rgb="FFC6EFCE"/>
+</patternFill/>
+</fill>
+</fills>
+
+__Пример заполнения borders(границы)__:
+<borders count="2">
+	<border>
+		<left/>
+		<right/>
+		<top/>
+		<bottom/>
+		<diagonal/>
+	</border>
+	<border>
+		<left style="thin">
+			<color indexed="64"/>
+		</left>
+		<right style="thin">
+			<color indexed="64"/>
+		</right>
+		<top style="thin">
+			<color indexed="64"/>
+		</top>
+		<bottom style="thin">
+			<color indexed="64"/>
+		</bottom>
+		<diagonal/>
+	</border>
+</borders>
+
+Тег __cellXfs__ содержит коллекцию индексов параметров форматирования:
+<cellXfs count="14">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+. . .
+</cellXfs>
+
+Пример:
+<cellXfs count="4">
+	<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+	<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1">
+		<alignment wrapText="1"/>
+	</xf>
+	<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1">
+		<alignment horizontal="center" vertical="center"/>
+	</xf>
+	<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">
+		<alignment horizontal="center" vertical="center"/>
+	</xf>
+</cellXfs>
+
+1.  numFmtId — указание формата текста в ячейке (дата, валюта, число, текст, ...). Полный перечень этих типов указан ниже.
+2.  fontId, fillId, borderId — ссылка на шрифт/заливку/границы (см. секцию 1, 2 и 3 соответственно). Нумерация начинается с 0.
+3.  applyFont, applyFill, applyBorder — указание на то, что при оформлении этой ячейки вообще используется кастомный шрифт/заливка/границы. По умолчанию 0, так что можно не указывать вообще, как видно на примере в элементе #0.
+4. applyAlignment — указание на то, что выравнивание текста в ячейке будет отличаться от стандартного. По умолчанию 0, но если указано «1», то в родительский тег <xf />
+встраивается тег <alignment />, как видно на примере начиная с #1.
+
+Значения для тега __numFmtId__:
+ID	formatCode
+0	General
+1	0
+2	0.00
+3	#,##0
+4	#,##0.00
+9	0%
+10	0.00%
+11	0.00E+00
+12	# ?/?
+13	# ??/??
+14	mm-dd-yy
+15	d-mmm-yy
+16	d-mmm
+17	mmm-yy
+18	h:mm AM/PM
+19	h:mm:ss AM/PM
+20	h:mm
+21	h:mm:ss
+22	m/d/yy h:mm
+37	#,##0 ;(#,##0)
+38	#,##0 ;[Red](#,##0)
+39	#,##0.00;(#,##0.00)
+40	#,##0.00;[Red](#,##0.00)
+45	mm:ss
+46	[h]:mm:ss
+47	mmss.0
+48	##0.0E+0
+49	@
+
+Применение:
+<row r="10">
+<c r="A10" s="12" t="s">
+<v>6</v>
+</c>
+. . .
+</row>
+From the attribute s="12" we know that the cell's formatting is stored at the 13th (zero-based index) <xf> within the <cellXfs> collection in the styles part. 
