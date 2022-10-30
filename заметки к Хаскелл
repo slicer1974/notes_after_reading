@@ -273,47 +273,132 @@ Nothing
 Вместо нее можно использовать инфиксную функцию ap. Как правило, любой вызов в форме liftMn f x1 x2 ... xn можно заменить выражением f `ap` x1 `ap` x2 `ap` ... `ap` xn
 
 ===
-Монада State - функция с состоянием
+Монада __State__ - функция с состоянием:
+State s a, где s - какое-либо состояние, 
+	               a - значение, получаемое каким то образом из состояния
+
 Состояние, предшествующее выполнению функции, может рассматриваться как ее дополнительный аргумент. Тогда если в общем виде у нас
 есть функция типа a -> b , то функция, которая также получает состояние типа s, должна иметь тип a -> s -> b . Эта функция в конце ее выполнения должна быть также наделена состоянием, которое впоследствии может быть передано другой функции, ожидающей состояние. При условии, что функция возвращает значение типа b , мы можем добавить в пару к нему значение типа s . В окончательном виде функции, манипулирующие состоянием, имеют тип a -> s -> (b,s) .
-	
+
+__При создании монады в нее передается начальное состояние s. Return поднимает в монаду значение.__
+
 #data State s a = State { runState :: s -> (a, s) }
  
 #instance Monad (State s) where
 #    return a = State $ \s -> (a, s)
 #    m >>= f  = State $ \s -> let (a, s') = runState m s in runState (f a) s'
  
-The get function retrieves the state by copying it as the value. The put function sets the state of the monad and does not yield a value. 
+Функция __runState__ возвращает пару (значение, состояние) из монады
+#runState (return 'X') 1
+		('X',1)
+Функция __get__ возвращает состояние, копируя его в поле "значение" пары ("значение", "состояние").
 #get :: State s s
 #get = State $ \s -> (s, s)
- 
+#runState get 1
+		(1,1)
+Функция __put__ устанавливает состояние и не возвращает значение
 #put :: s -> State s ()
 #put s = State $ \_ -> ((), s)
- 
-Пример использования:
-#data MyType = MT Int Bool Char Int deriving Show
+# runState (put 5) 1
+		((),5)
+Комбинирование:
+#runState (do { put 5; return 'X' }) 1
+		('X',5)
+Дополнительные функции __modify__ и __gets__ - вариации put и get:
+#modify :: (s -> s) -> State s ()
+#modify f = do { x <- get; put (f x) }
+#runState (do {put 5; pure 'X'; modify (+5)}) 1
+		((),10)
+#gets :: (s -> a) -> State s a
+#gets f = do { x <- get; return (f x) }
+#runState (do {put 5; pure 10; gets (*2)}) 1
+		(10,5)
+__evalState__ и __execState__ просто оставляют одно из двух значений, возвращенных runState. EvalState возвращает значение,  а execState возвращает состояние:
+#evalState :: State s a -> s -> a
+#evalState act = fst . runState act
+#evalState (do {put 5; pure 'X'}) 1
+		'X'
+#execState :: State s a -> s -> s
+#execState act = snd . runState act
+#execState (do {put 5; pure 'X'}) 1
+		5
 
-Using the State monad, we can define a function that returns  a random value and updates the random generator state at  the same time.
-#getAny :: (Random a) => State StdGen a
-#getAny = do g  <- get
-#            (x,g') <- return $ random g
-#            put g'
-#            return x
+__Пример использования:__
+#module StateGame where
+#import Control.Monad.State
+-- Example use of State monad
+-- Passes a string of dictionary {a,b,c}
+-- Game is to produce a number from the string.
+-- By default the game is off, a 'c' toggles the
+-- game on and off. A 'a' gives +1 and a b gives -1.
+-- E.g 
+-- 'ab'    = 0
+-- 'ca'    = 1
+-- 'cabca' = 0
+-- State = game is on or off & current score
+--       = (Bool, Int)
 
- Similar to getAny, but it bounds the random value returned
-#getOne :: (Random a) => (a,a) -> State StdGen a
-#getOne bounds = do g  <- get
-#                   (x,g') <- return $ randomR bounds g
-#                   put g'
-#                   return x
+#type GameValue = Int
+#type GameState = (Bool, Int)
 
-Using the State monad with StdGen as the state, we can build random complex types without manually threading the random generator states through the code.
-#makeRandomValueST :: StdGen -> (MyType, StdGen)
-#makeRandomValueST = runState (do n <- getOne (1,100)
-#                                 b <- getAny
-#                                 c <- getOne ('a','z')
-#                                 m <- getOne (-n,n)
-#                                 return (MT n b c m))
+#playGame :: String -> State GameState GameValue
+#playGame []     = do
+#   (_, score) <- get
+#    return score
+
+#playGame (x:xs) = do
+#    (on, score) <- get
+#    case x of
+#         'a' | on -> put (on, score + 1)
+#        'b' | on -> put (on, score - 1)
+#         'c'      -> put (not on, score)
+#         _        -> put (on, score)
+#    playGame xs
+
+#startState = (False, 0)
+
+#main = print $ evalState (playGame "abcaaacbbcabbab") startState
+
+__Пример 2:__
+Игровое поле:
+#data GameField = GameField Int (Int, Int)
+
+Функция передвижения:
+#move :: Char -> GameField -> GameField
+#move 'W' (GameField s (yH, xH)) = GameField s ((yH - 1) `max` 1, xH)
+#move 'A' (GameField s (yH, xH)) = GameField s (yH, (xH - 1) `max` 1)
+#move 'S' (GameField s (yH, xH)) = GameField s ((yH + 1) `min` s, xH)
+#move 'D' (GameField s (yH, xH)) = GameField s (yH, (xH + 1) `min` s)
+#move _   gf                     = gf
+
+Определим функцию:
+#heroMove :: Char -> State GameField ()
+#heroMove ch = modify (move ch)
+она принимает символ, а возвращает монаду State, состоянием которой будет GameField (игровое поле), а возвращаемое значение ().
+
+И наконец, определим функцию
+#pathMove :: String -> State GameField ()
+#pathMove = mapM_ heroMove
+Эта функция будет обрабатывать строку, которая по сути будет путем, по которому пройдет наш герой. Реализована эта функция через:
+#mapM_ :: (Char -> State GameField ()) -> String -> State GameField ()
+
+Все готово, чтобы написать простую интерактивную программу. Пользователь введет путь и получит результат.
+#module GameFieldState where
+#import           Control.Monad.State
+#import           GameField
+
+#heroMove :: Char -> State GameField ()
+#heroMove ch = modify (move ch)
+
+#pathMove :: String -> State GameField ()
+#pathMove = mapM_ heroMove
+
+#main :: IO ()
+#main = do
+#  let gf = GameField 3 (2, 2) -- создание игрового поля
+#  print gf                    -- вывод первоначального игрового поля
+#  path <- getLine             -- получение пользовательского ввода
+#  print $ execState (pathMove path) gf -- изменение и вывод игрово
 
 ===
 Монада Writer - объединяет логи
