@@ -1,0 +1,365 @@
+Создание полноценной рыбы проекта React:
+#npx create-react-app my_app
+Создание пустого проекта:
+#npm init -y
+Добавление зависимостей:
+#npm -i react react-dom и т.д.
+
+__Элемент React__ — это просто литерал JavaScript, который сообщает React, как создать элемент DOM. В журнале этот элемент выглядит так: 
+#{ 
+#$$typeof: Symbol(React.element), 
+#"type": "h1", 
+#"key": null, 
+#"ref": null, 
+#"props": {id: "recipe-0", children: "Baked Salmon"}, 
+#"_owner": null, 
+#"_store": {} 
+#} 
+Именно так выглядит структура элемента React. Некоторые поля используются самим React:  _owner, _store, и $$typeof . 
+
+Свойство __type__ элемента React сообщает React, какой тип элемента HTML или SVG нужно создать. 
+Свойство __props__ содержит данные и дочерние элементы (__children__), необходимые для создания элемента DOM. 
+Свойство __key__ помогает React эффективно обновлять DOM
+
+Чтобы создать элемент React, достаточно вызвать __React.createElement(elementName, data, child)__ :
+#React.createElement("h1", { id: "recipe-0" }, "Baked Salmon");
+Три аргумента: 
+Первый аргумент __elementName__ определяет тип элемента, который мы хотим создать  -  h1
+Второй аргумент __data__ определяет свойства элемента. Элемент h1 имеет идентификатор recipe-0.
+Третий аргумент __child__ соответствует дочерним элементам: это могут быть любые узлы, вставленные между открывающим и закрывающим тегами (в данном случае только некоторый текст). 
+
+При вызове createElement() можно передавать неограниченное количество параметров. Все параметры, после второго, становятся дочерними элементами. Эти дочерние элементы становятся одноуровневыми, то есть они находятся на одном уровне иерархии по отношению друг к другу.
+Если в третьем параметре createElement() передается строка, то она задает текстовое значение создаваемого элемента
+
+Листинг 1.2. Создание и прорисовка элемента h1 (index.html) 
+#var h1 = React.createElement('h1', null, 'Hello world!') 
+#ReactDOM.render (  		//Прорисовывает элемент  h1 в реальном элементе DOM с идентификатором «content»
+#	h1, 			
+#	document.getElementById('content')
+# )
+
+Листинг 2.1. Создание элемента <div> с двумя дочерними элементами <h1> 
+# let h1 = React.createElement('h1', null, 'Hello world!') 
+# ReactDOM.render(  
+#	React.createElement('div', null, h1, h1),  
+# 	document.getElementById('content') 
+# )
+
+Мы можем отобразить элемент React и его дочерние элементы в DOM с помощью метода __React DOM.render__. Для этого мы передадим этот элемент в качестве первого аргумента, а вторым аргументом будет целевой узел, в котором нужно отобразить элемент:
+# const dish = React.createElement("h1", null, "Baked Salmon");
+# ReactDOM.render(dish, document.getElementById("root")); 
+Если в ReactDOM.render передать первым параметром массив он отобразит элементы этого массива как одноуровневые в соответствующем контейнере:
+# const dessert = React.createElement("h2", null, "Coconut Cream Pie");
+# ReactDOM.render([dish, dessert], document.getElementById("root")); 
+Этот код отобразит оба элемента как одноуровневые внутри корневого контейнера.
+
+Создание элементов с помощью массива:
+#const items = [ 
+#	"1 cup unsalted butter", 
+#	"1 cup crunchy peanut butter",
+#];
+#React.createElement( "ul", 
+#	{ className: "ingredients" }, 
+#	items.map( (ingredient , i ) => 
+#		React.createElement("li", { key : i }, ingredient)
+#	) 
+#); 
+Этот синтаксис создает элемент React для каждого элемента в массиве items. Каждая строка отображается в дочерних элементах списка как текст. Значение для каждого элемента массива отображается как элемент списка. 
+Когда мы создаем список дочерних элементов путем итерации по массиву, React хочет, чтобы каждый из них имел свойство __key__. Свойство key помогает React эффективно обновлять DOM. Можно использовать индекс массива для каждого элемента массива как уникальное значение.
+
+Отделение данных от процедуры создания элементов:
+#const secretIngredients = [ 
+#	"1 cup unsalted butter", 
+#	"1 cup crunchy peanut butter",
+#];
+На входе функции, создающей элементы используется деструктуризация свойства __props__ элемента, с выделением из него массива items:
+#function IngredientsList( { items } ) { 
+#	return React.createElement( 
+#		"ul", 
+#		{ className: "ingredients" }, 
+#		items.map((ingredient, i) => 
+#			React.createElement("li", { key: i }, ingredient) 
+#		) 
+#	); 
+#}
+#ReactDOM.render( 
+#	React.createElement(IngredientsList, { items: secretIngredients }, null), 
+#	document.getElementById("root") 
+#);
+
+Можно упростить синтаксис создания элементов, если использовать __JSX__.
+Например:
+#import React, {useState} from 'react' 
+#function App( ) {
+#	const [counter, setCounter] = useState(initialState: 0);
+# 	function increment ( ) {
+#		setCounter( value: counter + 1 )
+#	}
+#	return ( 
+#		<div> 
+#			<button onClick = {increment} > Добавить </button>
+#		</div> 
+#	); 
+#}
+
+Аббревиатура JSX включает JS из JavaScript и X из XML. JSX — это расширение JavaScript, которое позволяет определять элементы React с использованием синтаксиса тегов непосредственно в коде JavaScript. Эквивалентные записи:
+
+__React Element__ 	React.createElement(IngredientsList,{list:[...]}); 
+__JSX__ 				<IngredientsList list={[...]}/>
+
+
+Данные элемента хранятся в __состоянии__. Изменение данных элемента возможно __только__ через работу с его состоянием с использованием __хуков__. 
+
+__ХУКИ__
+Хуки содержат логику повторно используемого кода, отдельную от дерева компонентов. Они позволяют добавлять компонентам функциональность. Когда данные в хуке меняются, хук может повторно отобразить связанный компонент с новыми данными.
+В React есть несколько встроенных хуков, которые можно использовать прямо из коробки.
+
+Хук __useState__  - __хранение состояния__.
+Хук __useState__ — это функция, которую мы можем вызвать для возврата __массива__. Первый элемент этого массива — переменная состояния, которую мы хотим использовать.
+Второй элемент массива, возвращаемый хуком useState, — это функция, которая будет использоваться для изменения значения состояния (функцию определять отдельно не нужно) .
+На вход  __useState__ принимает: простые значения (boolean, int итд), массивы и объекты о вложенными ключами 
+#import React, {useState} from 'react' 
+#function App( ) {
+#	const [counter, setCounter] = useState(initialState: 0);
+# 	function increment ( ) {
+#		setCounter( value: counter + 1 )
+#	}
+#	return ( 
+#		<div> 
+#			<button onClick = {increment} > Добавить </button>
+#		</div> 
+#	); 
+#}
+Хуки  работают __асинхронно__. Если нужно несколько изменений стейта в одной функции  - лучше это делать через callback функцию:
+# 	function increment ( ) {
+#		setCounter( prev => prev + 1 )
+#	}
+
+Если при инициализации стейта нужны какие-то дополнительные вычисления, чтобы избежать вызова этих вычислений при каждом рендеринге в useState можно передать callback функцию:
+#	function ComputeInitCounter( ) {
+#		return Math.trunc( x: Math.random( ) * 20 )
+#}
+#	const [counter, setCounter] = useState(initialState: () => { return ComputeInitCounter( ) } )
+
+Стейтов может быть много, лучше использовать отдельный вызов useState для каждого стейта.
+
+Хук __useEffect__ - __для вызова побочных эффектов__ - т.е. функций, не возвращающих значение, а вызываемых для выполнения действий.
+Срабатывает __при каждом обновлении компонента__. Имеет право вызова любых побочных эффектов.
+Alert, console.log или взаимодействие с браузером или собственным API не являются частью рендеринга и возврата. Однако в приложении React рендеринг влияет на результаты одного из этих событий. Мы можем использовать хук useEffect, чтобы дождаться рендеринга, а затем передать значения в предупреждение или console.log: 
+#useEffect(() => { 
+#	console.log(checked ? "Yes, checked" : "No, not checked"); 
+#}); 
+Аналогично мы можем проверить значение checked при рендеринге, а затем установить его в localStorage: 
+#useEffect(() => { 
+#	localStorage.setItem("checkbox-value", checked); 
+#});
+Для useEffect вторым параметром передается массив зависимостей (при именении какого props или state мы должны вызвать render).  Если любое из этих значений изменится, эффект будет вызван снова. Также можно в качестве второго аргумента функции useEffect указать пустой массив зависимостей. Это приведет к тому, что эффект будет вызываться __только один раз после монтирования компонента__.
+#useEffect(() => { 
+#	localStorage.setItem("checkbox-value", checked); 
+#}[]);
+
+Если callback функция возвращает какую-то функцию (см. ниже - return(...)), то эта функция будет вызвана __только один раз в момент демонтирования компонента__:
+#useEffect(() => { 
+#	console.log("fresh render"); 
+#	return ()=>{ }; 
+#}, [words]); }
+Обычно в этой функции вызываются разнообразные очистки, отписывания итд.
+
+Хук __useMemo__ - __выполняет мемоизацию вычислений переданной функции__.
+Использование useMemo целесообразно только в случае реально громоздких вычислений связанной переменной. Первый параметр - вычисляемая функция - callback. Второй параметр - массив зависимых переменных, при изменении которых происходит повторное вычисление функции. 
+#const sortedPosts = useMemo(() => {
+#        if(sort) {
+#            return [...posts].sort((a, b) => a[sort].localeCompare(b[sort]))
+#        }
+#        return posts;
+#    }, [sort, posts])
+
+Хук __useRef__ используется для создания __ссылки__ .
+В React ссылка — это объект, который хранит значения в течение всего времени жизни компонента. 
+#import React, { useRef } from "react"; 
+#export default function AddColorForm({ onNewColor = f => f }) { 
+#	const txtTitle = useRef(); 
+#	const hexColor = useRef(); 
+#	const submit = e => { ... } 
+#	return (...) 
+#}
+Мы можем установить значения для этих ссылок прямо в JSX, используя свойство ref:
+#return ( 
+#	<form onSubmit={submit}> 
+#	<input ref={txtTitle} type="text" placeholder="color title..." required /> 
+#	<input ref={hexColor} type="color" required /> 
+#	<button>ADD</button> </form> );
+#}
+
+Хук __useCallback__ можно использовать как useMemo, но он запоминает функции, а не значения. 
+#const fn = useCallback(() => { 
+#	console.log("hello"); 
+#	console.log("world"); 
+#}, []); 
+
+#useEffect(() => { 
+#	console.log("fresh render"); 
+#	fn(); 
+#}, [fn]); 
+Хук useCallback запоминает значение функции fn . Так же, как useMemo и useEffect, он ожидает в качестве второго аргумента массив зависимостей. В примере мы создадим мемоизированный обратный вызов один раз, потому что массив зависимостей пуст.
+
+__КОМПОНЕНТЫ__
+Компонент — это всего лишь функция, принимающая __props__ и возвращающая разметку. 
+#import React from 'react'; 
+#const MyButton = ({children, ...props}) => {
+#return ( 
+#		<button {...props} >
+#			{children}	
+#		</button>		
+#		);
+#};
+#export default MyButton; 
+
+Использование в основном приложении:
+#return  {
+#		<div>
+#			<form>
+#			<MyButton> onClick = {addNewPost}>Создать пост</MyButton>
+#			</form>
+#		</div>
+
+Для неуправляемого компонента данные передаются через хуки __useRef__.
+
+
+Обмен данных между компонентами:
+* если осуществляется через данные __props__ -  всегда идет сверху вниз: от родителя к дочернему компоненту
+* для передачи из дочернего компонента: из родительского компонента передается через __props__ callback-функции c изменяемыми данными, в дочернем компоненте функция вызывается.
+* чтобы передать __props__ из верхнего компонента можно их развернуть прямо в определении компонента:
+#const MyButton = ({children, ...props}) => {
+#    return (
+#    <button {...props} className={classes.myBtn}>
+#        {children}
+#    </button>    
+#    );
+#};
+Теперь в компонент можно передать любые props при вызове:
+#        <MyButton disabled>Создать пост</MyButton>
+Состояние кнопки disabled будет передано и обработано в компоненте.
+
+
+__Жизненный цикл компонента__ 
+Монтирование (mount)  - компонент создается и монтируется в DOM-дерево
+Обновление (update)  - активная стадия, работа с данными и рендеринг
+Размонтирование (unmount) - исключение компонента из DOM и удаление
+Для работы со стадиями жизненного цикла используется хук __useEffect__
+
+__ПОЛЬЗОВАТЕЛЬСКИЕ ХУКИ__
+Должны начинаться на  use. Могут оборачивать другие хуки.
+Пример:
+#import { useState } from "react"; 
+#export const useInput = initialValue => { 
+#	const [value, setValue] = useState(initialValue); 
+#	return [ 
+#		{ value, onChange: e => setValue(e.target.value) }, 
+#		() => setValue(initialValue) 
+#	]; 
+#};
+
+Пример использования:
+#import React from "react"; 
+#import { useInput } from "./hooks";
+#export default function AddColorForm({ onNewColor = f => f }) { 
+#	const [titleProps, resetTitle] = useInput(""); 
+#	const [colorProps, resetColor] = useInput("#000000");
+#	...
+
+
+__КОНТЕКСТ__
+Вы можете разместить данные в контексте React, создав __поставщик контекста (provider)__ — компонент, который можно обернуть вокруг всего дерева компонентов или определенных его разделов __Потребитель контекста__ (consumer) — компонент, который извлекает данные из контекста. Использование контекста по-прежнему позволяет хранить данные о состоянии в одном месте, но не требует их передачи через группу компонентов, которым они не нужны.
+Пример использования контекста:
+#import React, { createContext } from "react"; 
+#import colors from "./color-data";
+#import { render } from "react-dom"; 
+#import App from "./App"; 
+#export const ColorContext = createContext(); 
+#render( 
+#	<ColorContext.Provider value={{ colors }}> 
+#		<App /> 
+#	</ColorContext.Provider>, 
+#	document.getElementById("root") 
+#);
+
+ContextProvider не всегда должен оборачивать все приложение. Вы можете обернуть с его помощью компоненты определенных разделов, если это сделает приложение более эффективным. Provider будет предоставлять значения контекста только своим дочерним элементам.
+Хук __useContext__ получает нужные нам значения из контекста Consumer:
+#import React, { useContext } from "react"; 
+#import { ColorContext } from "./"; 
+#import Color from "./Color"; 
+#export default function ColorList() { 
+#	const { colors } = useContext(ColorContext); 
+#	if (!colors.length) return <div>No Colors Listed. (Add a Color)</div>; 
+#	return ( 
+#		<div className="color-list"> 
+#			{ 
+#				colors.map(color => <Color key={color.id} {...color} />) 
+#			} 
+#		</div> 
+#	); 
+#}
+
+__React-router__
+
+Библиотека для работы с маршрутизацией страниц.
+Маршрутизатор позволяет настраивать маршруты для каждого раздела сайта. Каждый маршрут — это конечная точка, которую можно ввести в адресную строку браузера. Когда запрашивается маршрут, мы можем отобразить соответствующий контент.
+Содержит компоненты  Redirect, Route, Switch для выбора, обработки страниц приложения.
+
+Компонент  __Route__.
+Каждый компонент Route имеет свойства path и element. Когда расположение браузера совпадает с path, отобразится element. 
+#<Route path="/" element={<Home />} /> 
+#<Route path="/about" element={<About />} /> 
+#<Route path="/events" element={<Events />} />
+Хук __useLocation()__ - возвращает значение текущего местоположения (то есть свойство с информацией о том, на какую страницу вы перешли). 
+#let location = useLocation(); 
+#console.log(location);
+Можно создавать вложенные маршруты
+
+Компонент __Redirect__ позволяет перенаправить пользователя на определенный маршрут.
+Redirect - безусловная маршрутизация, как правило используется при указании маршрута по умолчанию
+#<Route path="/" element={<Home />} /> 
+#// Other Routes 
+#<Redirect from="services" to="about/services" />
+
+Можно создать конфигурацию маршрута по-другому - использовать хук __useRoutes__. Чтобы переделать приложение под использование useRoutes, нужно внести изменения в компонент App (или туда, где настроены маршруты). 
+#import { useRoutes } from "react-router-dom"; 
+#function App() { 
+#let element = useRoutes([ 
+#{ path: "/", element: <Home /> }, 
+#{ path: "about", element: <About />, children: [ 
+#	{ path: "services", element: <Services /> }, 
+#]); 
+#return element; 
+#}
+
+Еще одна полезная функция React Router — это возможность настраивать __параметры маршрутизации__ — переменные, которые получают значения из URL- адреса. Они чрезвычайно полезны в управляемых данными веб-приложениях для фильтрации контента или управления настройками рендеринга.
+Для этого воспользуемся хуком __useParams__ (возвращает в т.ч. id из URL) : 
+#import { useParams } from "react-router-dom"; 
+#export function URLParams() { 
+#let params = useParams(); 
+#console.log(params); 
+#return ( <div> <h1>{params.id}</h1> </div> ); 
+#}
+
+Для того, чтобы переходить между маршрутами без перезагрузки страниц нужно использовать компонент __Link__ из пакета "react-router-dom":
+#            <div className="navbar__links">
+#               <Link to="/about">О сайте</Link>
+#                <Link to="/posts">Посты</Link>
+#           </div>
+
+Компонент __Switch__ - условная маршрутизация. Позволяет группировать маршруты и выбрать хотя бы один из тех. которые вложены внутри компонента. Если последним компонентом в Switch добавить компонент Redirect, то в случае неправильного маршрута произойдет автоматический переход по маршруту, указанному в Redirect:
+#            <Switch>
+#                {privateRoutes.map(route =>
+#                    <Route
+#                        component={route.component}
+#                        path={route.path}
+#                        exact={route.exact}
+#                        key={route.path}
+#                    />
+#                )}
+#                <Redirect to='/posts'/>
+#            </Switch>
+
+При использовании хука __useHistory__ можно динамически указывать цель перехода. (см . хук __useParams__)
