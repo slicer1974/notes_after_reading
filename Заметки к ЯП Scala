@@ -633,7 +633,15 @@ __Эта-расширение__ - преобразование метода в �
 # val twoArgsRemaining  = threeArgAdder(2) _ // y => z => 2 + y + z
 Таким образом для функции с несколькими списками аргументов символ _ заменяет не переданные аргументы - каррирование.
 
-Typeclasses
+#ВЫСОКОУРОВНЕВЫЕ ТИПЫ
+Scala types belong to kinds. Think of kinds as types of types.
+Plain types like Int, String or your own non-generic classes belong to the value-level kind — the ones you can attach to values.
+Generic types like List belong to what I called the level-1 kind — they take plain (level-0) types as type arguments.
+Scala allows us to express higher-kinded types — generic types whose type arguments are also generic. I called this kind the level-2 kind.
+Generic types can’t be attached to values on their own; they need the right type arguments (of inferior kinds) in place. For this reason, they’re called type constructors.
+
+#TYPECLASSES
+```
 #trait Summable[T] {
 #    def sumElements(list: List[T]): T
 #}
@@ -651,55 +659,7 @@ Typeclasses
 #processMyList(List(1,2,3)) // 6
 #processMyList(List("Scala ", "is ", "awesome")) // "Scala is awesome"
 #processMyList(List(true, true, false)) // COMPILE TIME ERROR
+```
 
 The behavior we’ve just implemented is called __“ad hoc polymorphism”__ because the sumElements ability is unlocked __only in the presence__ of an implicit instance of the trait which provides the method definition, right there when it’s called, hence the “ad hoc” name. “Polymorphism” because the implementations we can provide can obviously be __different for different types__, as we did with Int and String.
 The trait Summable[T] itself is nothing special. However, when you __combine it__ with one/more __implicit instances__ of the trait - and in our case we IntSummable and StringSummable - we have a pattern, which we generally call a __“type class”__. This structure allows us to define specific implementations for certain types and not for others, in the “ad hoc polymorphic” style we did earlier.
-
-Free Monads
-Monads - for sequence computations.
-Free Monad - for sequence computations as data structures, THEN attach the monadic type at the end. The Free monad describes a similar “sequential” capability for a wrapper type __and for a well-defined value type__.
-В двух словах - позволяет разделить определение основных операций, бизнес-логику (computation) и выполнение программы. 
-Базово Free Monad выглядит так:
-#object FreeMonad {
-#  trait Monad[M[_]] {
-#    def pure[A](a: A): M[A]
-#    def flatMap[A, B](ma: M[A])(f: A => M[B]): M[B]
-#  }
-#
-#  object Monad {
-#    def apply[M[_]](using monad: Monad[M]): Monad[M] = monad
-#  }
-#
-#  trait ~>[F[_], G[_]] {
-#    def apply[A](fa: F[A]): G[A]
-#  }
-#
-#  trait Free[M[_], A] {
-#    import Free.*
-#    def flatMap[B](f: A => Free[M, B]): Free[M, B] = FlatMap(this, f)
-#    def map[B](f: A => B): Free[M, B] = flatMap(a => pure(f(a)))
-#    def foldMap[G[_]: Monad](natTrans: M ~> G): G[A] = this match {
-#      case Pure(a) => Monad[G].pure(a)
-#      case Suspend(ma) => natTrans.apply(ma)
-#      case FlatMap(fa, f) => // need a G[B]
-#        Monad[G].flatMap(fa.foldMap(natTrans))(a => f(a).foldMap(natTrans) )
-#    }
-#  }
-#
-#  object Free {
-#    def pure[M[_], A](a: A): Free[M, A] = Pure(a)
-#    def liftM[M[_], A](ma: M[A]): Free[M, A] = Suspend(ma)
-#
-#    case class Pure[M[_], A](a: A) extends Free[M, A]
-#    case class FlatMap[M[_],A,B](fa: Free[M, A], f: A => Free[M, B]) extends Free[M, B]
-#    case class Suspend[M[_], A](ma: M[A]) extends Free[M, A]
-#  }
-
-liftM - поднимает монаду во Free
-foldMap - реализует натуральное преобразование между монадами (поскольку они эндофункторы)
-The Pure type simply wraps a single value of type A; we’ll make use of this later when we evaluate foldMap. 
-The FlatMap case class follows the signature of the flatMap method in the Free trait, keeping the Free instance to be transformed and a function to turn an A into another instance of Free[M, B]. 
-The final case class is Suspend which corresponds to the liftM method.
-
-Сначала мы __определяем__ абстрактную бизнес-логику (типа алгебру), напр.:
-затем __интерпретируем__ ее, реализуя в конкретной монаде:
