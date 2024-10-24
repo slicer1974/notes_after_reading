@@ -1,0 +1,30 @@
+object TaglessFinal_V2 {
+//Алгебра
+  trait UserLogin[E[_]] {
+    def checkLogin(mfa: Boolean): E[Boolean]
+    def countActiveSessions(server: Int): E[Int]
+    def mfa_v1(email: E[Boolean], sms: E[Boolean]): E[Boolean]
+    def mfa_v2(phone: E[Boolean], mobileApp: E[Boolean]): E[Boolean]
+    def totalSessionLogins(server1Logins: E[Int], server2Logins: E[Int]): E[Int]
+  }
+//Имплементация алгебры
+  case class UserLoginStatus[A](value: A)
+  given loginCapabilityImplementation: UserLogin[UserLoginStatus] with {
+    override def checkLogin(mfa: Boolean) = UserLoginStatus(mfa)
+    override def countActiveSessions(server: Int) = UserLoginStatus(server)
+    override def mfa_v1(email: UserLoginStatus[Boolean], sms: UserLoginStatus[Boolean]) = UserLoginStatus(email.value || sms.value)
+    override def mfa_v2(phone: UserLoginStatus[Boolean], mobileApp: UserLoginStatus[Boolean]) = UserLoginStatus(phone.value && mobileApp.value)
+    override def totalSessionLogins(server1Logins: UserLoginStatus[Int], server2Logins: UserLoginStatus[Int]) = UserLoginStatus(server1Logins.value + server2Logins.value)
+  }
+
+//Бизнес-логика
+  def userLoginFlow[E[_]](using alg: UserLogin[E]): E[Boolean] = {
+    import alg._
+    mfa_v1(checkLogin(true), mfa_v2(checkLogin(true), checkLogin(false)))
+  }
+
+  def checkLastStatus[E[_]](using alg: UserLogin[E]): E[Int] = {
+    import alg._
+    totalSessionLogins(countActiveSessions(24), countActiveSessions(3))
+  }
+}

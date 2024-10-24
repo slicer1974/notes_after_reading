@@ -1,0 +1,248 @@
+Starting with Scala 3.3, a <colon> token is also recognized where a function argument would be expected. Examples:
+```
+times(10):
+  println("ah")
+  println("ha")
+
+or
+
+credentials `++`:
+  val file = Path.userHome / ".credentials"
+  if file.exists
+  then Seq(Credentials(file))
+  else Seq()
+```
+
+What's more, a : in these settings can also be followed on the same line by the parameter part and arrow of a lambda.
+
+Scala 3 offers an optional end marker. Example:
+```
+def largeMethod(...) =
+  ...
+  if ... then ...
+  else
+    ... // a large block
+  end if
+  ... // more code
+end largeMethod
+```
+An end marker consists of the identifier end and a follow-on specifier token that together constitute all the tokes of a line. Possible specifier tokens are identifiers or one of the following keywords
+```
+if   while    for    match    try    new    this    val   given
+```
+
+In Scala 3, the implicit keyword, although fully supported (for this version), is being replaced:
+
+    implicit values and arguments replaced for given/using clauses
+    implicit defs (used for conversions) are replaced with explicit conversions
+    implicit classes are replaced with proper extension methods 
+
+#IMPLICIT PARAMETERS
+a __“given”__, that is, an automatically created instance which is readily available to be injected in the “right place”. The structure of the 
+declaration will look like this:
+```
+given personOrdering: Ordering[Person] with {
+  override def compare(x: Person, y: Person): Int =
+    x.surname.compareTo(y.surname)
+}
+```
+So notice we aren’t “assigning” the Ordering instance to a value. We are marking that instance as a “standard” (or a “given”), and we attach a name to it. The name is useful so we can reference this instance and use fields and methods on it, much like any other value.
+
+
+However, we also need to mark the places where this given should automatically be injected. For this, we mark the relevant method argument with the __"using"__ clause:
+
+#def listPeople(persons: Seq[Person])(using ordering: Ordering[Person]) = ...
+
+So that when we invoke this method, we don’t need to explicitly pass the ordering argument:
+
+#listPeople(List(Person("Weasley", "Ron", 15), Person("Potter", "Harry", 15))) // <- the compiler will inject the ordering here
+
+This leads to much cleaner code, especially in large function call chains.
+Once we used the given/using combo, we __didn’t even need the name__ of the given instance. In that case, we can simply write:
+```
+given Ordering[Person] {
+  override def compare(x: Person, y: Person): Int =
+    x.surname.compareTo(y.surname)
+}
+
+def listPeople(persons: Seq[Person])(using Ordering[Person]) = ...
+```
+
+As we saw earlier, a given instance will be automatically created and injected where a using clause is present. Taking this concept further, what if we had a given instance that depends on another given instance, via a using clause?
+
+In Scala 3, we can.
+
+Let’s imagine that in our big census application we have many types for which we have given instances of Ordering. Meanwhile, because we’re using pure FP to deal with value absence, we’re working with Options, and we need to compare them, sort them etc. Can we automatically create an Ordering[Option[T]] if we had an Ordering[T] in scope?
+
+```
+given optionOrdering[T](using normalOrdering: Ordering[T]): Ordering[Option[T]] with {
+  def compare(optionA: Option[T], optionB: Option[T]): Int = (a, b) match {
+    case (None, None) => 0
+    case (None, _) => -1
+    case (_, None) => 1
+    case (Some(a), Some(b)) => normalOrdering.compare(a, b)
+  }
+}
+```
+This structure tells the compiler, “if you have a given instance of Ordering[T] in scope, then you can automatically create a new instance of Ordering[Option[T]] with the implementation following the brace. Behind the scenes, the new given structure works similar to a method. If we ever need to call a method such as
+
+```
+def sortThings[T](things: List[T])(using ordering: Ordering[T]) = ...
+
+// elsewhere in our code
+val maybePersons: List[Option[Person]] = ...
+sortThings(maybePersons)
+```
+the compiler will automatically create an Ordering[Option[Person]] based on the existing Ordering[Person], so the call will look like
+
+#sortThings(maybePersons)(optionOrdering(personOrdering))
+
+Of course, that’s not what we see (because we don’t see anything), but this serves as an analogy to better understand the processes under the hood.
+
+
+#IMPLICIT CONVERSION
+An implicit conversion is a given instance of Conversion[A, B]. The example of the Person class would be
+```
+given stringToPerson: Conversion[String, Person] with {
+  def apply(s: String): Person = Person(s)
+}
+```
+but we still wouldn’t be able to rely on the implicit magic. We also need to specifically import the implicitConversions package. So we need to write
+```
+import scala.language.implicitConversions
+
+// somewhere in the code
+"Alice".greet
+```
+
+#TYPES EQUALITY and DIFFERENCE
+In Scala, the standard library contains the little-known type __=:=[A,B]__ (also usable infix as A =:= B) which denotes the “equality” of types A and B. The compiler is able to synthesize instances of =:=[A,A] wherever we have methods requiring an implicit argument or a using clause. In our case, we can write
+
+def processListsSameTypeV3[A, B](la: List[A], lb: List[B])(using A =:= B): List[(A, B)] =
+  processLists(la, lb)
+
+which means that wherever we call this method with some concrete types, the compiler will search for a given instance of =:= for those particular types. In our case, we have
+
+// works
+val sameKindOfLists = processListsSameTypeV3(List(1,2,3), List(4,5))
+// doesn't work
+val differentKindsOfLists = processListsSameTypeV3(List(1,2,3), List("black", "white"))
+
+__NotGiven - for DIFFERENCE__
+import scala.util.NotGiven
+
+The type NotGiven has special treatment from the compiler. Wherever we require the presence of a NotGiven[T], the compiler will successfully synthesize an instance of NotGiven[T] if and only if it cannot find or synthesize a given instance of T. In our case, we must not find or synthesize an instance of A =:= B, so our wrapped method becomes:
+
+def processListsDifferentType[A, B](la: List[A], lb: List[B])(using NotGiven[A =:= B]): List[(A, B)] =
+  processLists(la, lb)
+
+and with that, our code satisfies our constraints:
+
+// doesn't compile
+val sameListType = processListsDifferentType(List(1,2,3), List(4,5))
+// works
+val differentListTypes = processListsDifferentType(List(1,2,3), List("black", "white"))
+
+#SUMMON
+The method __summon__ in Predef returns the given of a specific type. For example, the given instance for Ord[List[Int]] is produced by
+```
+summon[Ord[List[Int]]]  // reduces to listOrd(using intOrd)
+```
+The summon method is simply defined as the (non-widening) identity function over a context parameter.
+```
+def summon[T](using x: T): x.type = x
+```
+summon — это аналог старого implicitly, глобального метода для получения ссылки на implicit-значение из контекста.
+
+
+#Simulating Scala 3 Contextual Abstraction Concepts with Scala 2 Implicits
+__Given Instances__
+Given instances can be mapped to combinations of implicit objects, classes and implicit methods.
+    Given instances without parameters are mapped to implicit objects. For instance,
+
+    given intOrd: Ord[Int] with { ... }
+
+    maps to
+
+    implicit object intOrd extends Ord[Int] { ... }
+
+    Parameterized givens are mapped to combinations of classes and implicit methods. For instance,
+
+    given listOrd[T](using ord: Ord[T]): Ord[List[T]] with { ... }
+
+    maps to
+
+    class listOrd[T](implicit ord: Ord[T]) extends Ord[List[T]] { ... }
+    final implicit def listOrd[T](implicit ord: Ord[T]): listOrd[T] =
+     new listOrd[T]
+
+    Alias givens map to implicit methods or implicit lazy vals. If an alias has neither type nor context parameters, it is treated as a lazy val, unless the right-hand side is a simple reference, in which case we can use a forwarder to that reference without caching it.
+
+Examples:
+
+given global: ExecutionContext = new ForkJoinContext()
+
+val ctx: Context
+given Context = ctx
+
+would map to
+
+final implicit lazy val global: ExecutionContext = new ForkJoinContext()
+final implicit def given_Context = ctx
+
+__Anonymous Given Instances__
+
+Anonymous given instances get compiler synthesized names, which are generated in a reproducible way from the implemented type(s). For example, if the names of the IntOrd and ListOrd givens above were left out, the following names would be synthesized instead:
+
+given given_Ord_Int: Ord[Int] with { ... }
+given given_Ord_List[T](using ord: Ord[T]): Ord[List[T]] with { ... }
+
+The synthesized type names are formed from
+
+    the prefix given_,
+    the simple name(s) of the implemented type(s), leaving out any prefixes,
+    the simple name(s) of the top-level argument type constructors to these types.
+
+Tuples are treated as transparent, i.e. a type F[(X, Y)] would get the synthesized name F_X_Y. Directly implemented function types A => B are represented as A_to_B. Function types used as arguments to other type constructors are represented as Function.
+Using Clauses
+
+Using clauses correspond largely to Scala 2's implicit parameter clauses. E.g.
+
+def max[T](x: T, y: T)(using ord: Ord[T]): T
+
+would be written
+
+def max[T](x: T, y: T)(implicit ord: Ord[T]): T
+
+in Scala 2. The main difference concerns applications of such parameters. Explicit arguments to parameters of using clauses must be written using (using ...), mirroring the definition syntax. E.g, max(2, 3)(using IntOrd). Scala 2 uses normal applications max(2, 3)(IntOrd) instead. The Scala 2 syntax has some inherent ambiguities and restrictions which are overcome by the new syntax. For instance, multiple implicit parameter lists are not available in the old syntax, even though they can be simulated using auxiliary objects in the "Aux" pattern.
+
+The summon method corresponds to implicitly in Scala 2. It is precisely the same as the the method in Shapeless. The difference between summon (or the) and implicitly is that summon can return a more precise type than the type that was asked for.
+Context Bounds
+
+Context bounds are the same in both language versions. They expand to the respective forms of implicit parameters.
+
+Note: To ease migration, context bounds in Scala 3 map for a limited time to old-style implicit parameters for which arguments can be passed either in a using clause or in a normal argument list. Once old-style implicits are deprecated, context bounds will map to using clauses instead.
+Extension Methods
+
+Extension methods have no direct counterpart in Scala 2, but they can be simulated with implicit classes. For instance, the extension method
+
+extension (c: Circle)
+  def circumference: Double = c.radius * math.Pi * 2
+
+could be simulated to some degree by
+
+implicit class CircleDecorator(c: Circle) extends AnyVal {
+  def circumference: Double = c.radius * math.Pi * 2
+}
+
+Abstract extension methods in traits that are implemented in given instances have no direct counterpart in Scala 2. The only way to simulate these is to make implicit classes available through imports. The Simulacrum macro library can automate this process in some cases.
+Type Class Derivation
+
+Type class derivation has no direct counterpart in the Scala 2 language. Comparable functionality can be achieved by macro-based libraries such as Shapeless, Magnolia, or scalaz-deriving.
+Context Function Types
+
+Context function types have no analogue in Scala 2.
+Implicit By-Name Parameters
+
+Implicit by-name parameters are not supported in Scala 2, but can be emulated to some degree by the Lazy type in Shapeless.
+

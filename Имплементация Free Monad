@@ -1,0 +1,94 @@
+The Free monad is a pattern which allows us to separate
+
+    the description of fundamental operations
+    the business logic of our application
+    the evaluation of that business logic
+
+In other words, our abstract program is what matters for our application/business logic. We can keep that fixed, and give it different interpreters depending on how our requirements change — e.g. perhaps we want the program to be evaluated asynchronously — or we can do the reverse. This makes it very easy to maintain, because we can work independently on either
+
+    the business logic, while keeping interpreters fixed
+    the interpreters, while keeping the business logic fixed
+    the fundamental operations and the interpreter(s), while keeping the business logic fixed
+
+So notice the flexibility we get by choosing to work on a piece of the system without affecting the others. Another benefit of this approach is testability, because we can always supply a “testing” monad to evaluate the program, make assertions and ensure the business logic is correct, while the interpreter itself can be independently tested.
+
+https://blog.rockthejvm.com/free-monad/
+Monads - for sequence computations.
+Free Monad - for sequence computations as data structures, THEN attach the monadic type at the end. The Free monad describes a similar “sequential” capability for a wrapper type __and for a well-defined value type__.
+В двух словах - позволяет разделить определение основных операций, бизнес-логику (computation) и выполнение программы. 
+Базово Free Monad выглядит так:
+```
+object FreeMonad {
+  trait Monad[M[_]] {
+    def pure[A](a: A): M[A]
+    def flatMap[A, B](ma: M[A])(f: A => M[B]): M[B]
+  }
+
+  object Monad {
+    def apply[M[_]](using monad: Monad[M]): Monad[M] = monad
+  }
+
+  trait ~>[F[_], G[_]] {
+    def apply[A](fa: F[A]): G[A]
+  }
+
+  trait Free[M[_], A] {
+    import Free.*
+    def flatMap[B](f: A => Free[M, B]): Free[M, B] = FlatMap(this, f)
+    def map[B](f: A => B): Free[M, B] = flatMap(a => pure(f(a)))
+    def foldMap[G[_]: Monad](natTrans: M ~> G): G[A] = this match {
+      case Pure(a) => Monad[G].pure(a)
+      case Suspend(ma) => natTrans.apply(ma)
+      case FlatMap(fa, f) => // need a G[B]
+        Monad[G].flatMap(fa.foldMap(natTrans))(a => f(a).foldMap(natTrans) )
+    }
+  }
+
+  object Free {
+    def pure[M[_], A](a: A): Free[M, A] = Pure(a)
+    def liftM[M[_], A](ma: M[A]): Free[M, A] = Suspend(ma)
+
+    case class Pure[M[_], A](a: A) extends Free[M, A]
+    case class FlatMap[M[_],A,B](fa: Free[M, A], f: A => Free[M, B]) extends Free[M, B]
+    case class Suspend[M[_], A](ma: M[A]) extends Free[M, A]
+  }
+```
+liftM - поднимает монаду во Free
+foldMap - для работы с монадами
+The Pure type simply wraps a single value of type A; we’ll make use of this later when we evaluate foldMap. 
+The FlatMap case class follows the signature of the flatMap method in the Free trait, keeping the Free instance to be transformed and a function to turn an A into another instance of Free[M, B]. 
+The final case class is Suspend which corresponds to the liftM method.
+
+Сначала мы __определяем__ абстрактную бизнес-логику (типа алгебру), напр.:
+```
+trait DBOps[A]
+  case class Create[A](key: String, value: A) extends DBOps[Unit]
+  case class Read[A](key: String) extends DBOps[A]
+  case class Update[A](key: String, value: A) extends DBOps[A]
+  case class Delete(key: String) extends DBOps[Unit]
+
+  // definitions - fancier algebra
+  type DBMonad[A] = Free[DBOps, A]
+
+  // "smart" constructors
+  def create[A](key: String, value: A): DBMonad[Unit] =
+    Free.liftM[DBOps, Unit](Create(key, value))
+
+  def get[A](key: String): DBMonad[A] =
+    Free.liftM[DBOps, A](Read[A](key))
+
+  def update[A](key: String, value: A): DBMonad[A] =
+    Free.liftM[DBOps, A](Update[A](key, value))
+
+  def delete(key: String): DBMonad[Unit] =
+    Free.liftM(Delete(key))
+
+  // business logic is FIXED
+  def myLittleProgram: DBMonad[Unit] = for { // monadic
+    _ <- create[String]("123-456", "Daniel")
+    name <- get[String]("123-456")
+    _ <- create[String]("567", name.toUpperCase())
+    _ <- delete("123-456")
+  } yield () // description of a computation
+```
+затем __интерпретируем__ ее, реализуя в конкретной монаде:
