@@ -1,0 +1,576 @@
+Inline your boilerplate – harnessing Scala 3 metaprogramming without macros
+Developer’s kit Scala Scala backend
+scala 3 metaprogramming
+Introduction
+
+We’ve all been there, being the good DDD devs that we are, we carefully craft our domain classes but then we find out we need to specify another kinda-the-same-but-not-really model for persisting that beautiful data in a database, throw in another one for on-the-wire transport and you find yourself with (at least) 3 samey definitions for each case class. You then need to write the glue code for going from one to the other and vice-versa, yadda-yadda… 
+
+But wait. Do you really need to?
+
+Scala being the beautiful beast that it is, has the concept of macros which enables us to put the compiler to work. As it turns out, people did just that despite macros being considered experimental in Scala 2 and not forward compatible with Scala 3 metaprogramming capabilities (which are no longer experimental). That sadly rendered a lot of useful and macro-heavy libraries unusable in Dotty without a complete rewrite, one of which is chimney – a Scala 2 macro library for automatic transformations between data types (and more).
+
+We’ll try to roll out our own simplified chimney for Scala 3 but with a twist – we’ll avoid writing any and all macro code and only use the provided metaprogramming primitives shipped with Dotty and some shiny new toys from our toolbox, such as match types.
+Requirements
+
+A transformation is an action consisting of going from one type to another, as simple as going from an Int to a String or as complex as going from a 30 field case class to a 25 field case class with several sub-transformations.
+
+We would like our transformations to meet certain criteria:
+
+    type-safety: failing to derive a transformation should result in a compile time error,
+    configurability: when an automatic transformation cannot be derived we should be able to aid the compiler in figuring out a proper way to transform to a given type, 
+    somewhat good error reporting: we’ve all seen type errors from hell and we’d like our errors to be readable
+
+When it comes to configurability we’d like to support these three use cases:
+
+    setting a constant value for a given field,
+    computing a value for a given field (by applying a function to the type we’re starting from),
+    renaming a field.
+
+An impromptu guide to match types and high level Scala 3 metaprogramming 
+Match types
+
+Have you ever wondered why you cannot append/prepend, remove an element or do pretty much anything ‘collection-like’ with a Tuple in Scala 2 (without switching your mind to Prolog)?
+
+The answer is really simple – the type system was not powerful enough* (there were some other ways to do that) and the only thing all the tuples had in common was being a Product which somewhat generalizes data types with fields but also throws all the type information out of the window.
+
+This is where match types come into play. They allow us to express type-level computations eg. computing the type of a tail of a Tuple:
+/
+type Tail[X <: Tuple] <: Tuple = X match {
+  case _ *: tail => tail
+}
+
+Scala
+
+Passing a type such as (Int, String, Double) will yield us a type comprised of the two last elements of the tuple (String, Double):
+
+summon[Tail[(Int, String, Double)] =:= (String, Double)]
+
+Scala
+
+What’s going on there exactly? Match types (as their name implies) allow us to pattern match on types, just like we’d do on values. To get a better understanding let’s look at a simple tail method for a List:
+
+def tail[A](list: List[A]): List[A] = list match {
+  case _ :: tail => tail
+}
+
+Scala
+
+Looks pretty similar, doesn’t it? But wait, what will happen if we input an empty List? That’s right, we get an exception:
+
+Exception in thread "main" scala.MatchError: List() (of class scala.collection.immutable.Nil$)
+
+Scala
+
+What will happen if we pass an EmptyTuple to our Tail match type? Also an exception, but this time – a compile-time one!
+
+summon[Tail[EmptyTuple] =:= (String, Double)]
+            ^
+Match type reduction failed since selector EmptyTuple
+matches none of the cases
+     case _ *: tail => tail
+
+Scala
+High level metaprogramming
+
+Literal types
+
+A literal type is a representation of a primitive value (Int, Char, the whole shabazz), a String or a singleton object in compile time. For example, you could write a code snippet like this:
+
+val one: 1 = 1
+val text: "text" = "text"
+
+Scala
+
+and the compiler will be very happy to consume it, but it doesn’t seem really useful at first, does it? Well it’s not really useful for your day to day programming (unless you really, really want to ensure a certain primitive value is exactly what you expect, I guess).
+
+What literal types are great at, is bridging the runtime and compile time worlds, which in turn allows us to turn types into their runtime counterparts. For example, you can turn a Tuple of literal Strings into a List of the same Strings, but usable at runtime:
+
+inline def labels[Labels <: Tuple](using ev: Tuple.Union[Labels] <:< String): List[String] = ev.substituteCo(constValueTuple[Labels].toList)
+
+val strings = labels[("one", "two", "three")]
+// returns List(one, two, three)
+
+Scala
+Mirrors
+
+Mirrors allow us to inspect and take up actions based on the structure of case classes and enums/sealed traits. Mirrors only expose one method each:
+
+    fromProduct for Product mirrors, which allows us to construct an instance of a case class from another case class (or anything marked with the Product trait):
+
+/** Create a new instance of type `T` with elements taken from product `p`. */
+def fromProduct(p: scala.Product): MirroredMonoType
+
+Scala
+
+    ordinal for Sum mirrors which allow us to get the ordinal number for a member of an enum/sealed trait:
+
+/** The ordinal number of the case class of `x`. For enums, `ordinal(x) == x.ordinal` */
+def ordinal(x: MirroredMonoType): Int
+
+Scala
+
+Everything else (that is: field labels, field types, etc.) are given to us as types (Tuples of literal Strings, Tuples of types and just literal Strings in some cases). For example, given a case class like this:
+
+case class Person(age: Int, name: String)
+
+Scala
+
+the corresponding Mirror will look something akin to this:
+
+Mirror.ProductOf[Person] {
+
+  type MirroredType = Person
+  type MirroredMonoType = Person
+  type MirroredLabel = "Person"
+  type MirroredElemTypes = (Int, String)
+  type MirroredElemLabels = ("age", "name")
+
+  def fromProduct(p: scala.Product): Person
+}
+
+Scala
+
+What exactly does this give us? Everything we need, really. To successfully transform a case class into another case class we need access to their field names and field types to pass them up to the derivation mechanism for all the fields. And having done that, we need to carefully rearrange the field order to fit the type we’re transforming into with the unsafe fromProduct method and we’re basically done.
+
+The ‘scala.compiletime’ package
+
+The last pieces of our puzzle lie inside the scala.compiletime package, the place where all Scala 3 metaprogramming utilities live.
+Let’s take a look at some of the most useful:
+
+    constValue: allows us to materialize a literal type into an actual value, failing at compile time if it cannot do so,
+
+val string = constValue["I'm a literal string"] 
+// evaluates to "I'm a literal string"
+
+val notReallyAConstValue = constValue[List[Int]] 
+// fails to compile
+
+Scala
+
+    summonInline: enables us to summon typeclass instances at a whim for any abstract parameter without specifying it in the method definition, it delays the evaluation of summoning until the call is fully inlined,
+
+def tired[A](using Ordering[A]): Ordering[A] =
+  summon[Ordering[A]]
+
+inline def wired[A]: Ordering[A] =
+  summonInline[Ordering[A]]
+
+Scala
+
+    erasedValue: this one is especially handy when dealing with Tuples of literal types, which allows us to pretty much treat them as compile time collections. What’s weird about this method is it forces us to pattern match on its types instead of values, you literally cannot use the return value of erasedValue as it will fail during runtime (hence the underscores in each case).
+
+inline def labels[Labels <: Tuple](using Tuple.Union[Labels] <:< String):  List[String] =
+inline erasedValue[Labels] match {
+  case _: EmptyTuple => 
+    List.empty
+  case _: (head *: tail) => 
+    constValue[head].asInstanceOf[String] :: labels[tail]
+}
+
+Scala
+Implementing automatic case class transformations
+Overview
+
+Let’s start with a short demo showcasing what the end product should look and behave like:
+
+import io.scalac.transformers.*
+
+case class Person(firstName: String, lastName: String, age: Int)
+
+case class PersonButMoreFields(firstName: String, lastName: String, age: Int, socialSecurityNumber: String)
+
+@main def demo = {
+  val person = Person("John", "Doe", 50)
+  val personWithMoreFields = PersonButMoreFields("Mark", "Dunk", 23, "SSN-123456")
+
+  // person.to[PersonButMoreFields] compile time error: 'Transformer not found for field socialSecurityNumber'
+
+  val fromPersonWithMoreToPerson = personWithMoreFields.to[Person] // Person("Mark", "Dunk", 23)
+
+  val fromPersonToPersonWithMoreFields =
+    person
+      .into[PersonButMoreFields]
+      .withFieldConst["socialSecurityNumber"]("SSN-987654") // should not compile without this line
+      .transform // PersonButMoreFields("John", "Doe", 50, "SSN-987654")
+
+/* val letsTryToBreakConfig =
+    person
+      .into[PersonButMoreFields]
+      
+      // compile time error: Int is not a valid type for field ("socialSecurityNumber" : String) in PersonButMoreFields
+      .withFieldComputed["socialSecurityNumber"](_.age)
+
+      // compile time error: PersonButMoreFields doesn't seem to have a field named ("socialSecurityNumber1" : String)
+      .withFieldConst["socialSecurityNumber1"]("asd")
+      .transform
+   */
+
+
+}
+
+Scala
+
+If you’ve ever used chimney before this should be pretty familiar, bar the weird JS object accessor look-a-like (withFieldConst[“socialSecurityNumber”]), what exactly is this thing? 
+
+This is how we encode configuration for a single field (socialSecurityNumber in this case) without macros, using String literals backed by a match type that ensures a given field actually exists, but let’s not get ahead of ourselves.
+The foundation
+
+The primitive building block for every transformation is a Transformer, a typeclass that encapsulates the logic of going from one type to another:
+
+trait Transformer[From, To]:
+  def transform(from: From): To
+
+object Transformer:
+  def apply[A, B](using transformer: Transformer[A, B]): Transformer[A, B] = transformer
+
+Scala
+
+We start from defining instances for our base cases:
+
+    transforming to the same type (identity Transformer):
+
+given [A]: Transformer[A, A] = 
+    new:
+      def transform(from: A): A = from
+
+Scala
+
+    transforming from a type A to a type B wrapped in an Option given that there exists a Transformer for going from A to B:
+
+given [A, B](using Transformer[A, B]): Transformer[A, Option[B]] =
+    new:
+      def transform(from: A): Option[B] =
+        Transformer[A, B].transform.andThen(Some.apply)(from)
+
+Scala
+
+    transforming an Option of A to an Option of B given that there exists a Transformer for going from A to B:
+
+given [A, B](using Transformer[A, B]): Transformer[Option[A], Option[B]] =
+    new:
+      def transform(from: Option[A]): Option[B] =
+        from.map(Transformer[A, B].transform)
+
+Scala
+
+    transforming a collection of As to collection of Bs given that there exists a Transformer for going from A to B:
+
+given [A, B, CollFrom[+elem] <: Iterable[elem], CollTo[+elem] <: Iterable[elem]](using
+    transformer: Transformer[A, B],
+    factory: Factory[B, CollTo[B]]
+  ): Transformer[CollFrom[A], CollTo[B]] =
+    new:
+      def transform(from: CollFrom[A]): CollTo[B] =
+        from.foldLeft(factory.newBuilder)(_ += transformer.transform(_)).result
+
+Scala
+
+Plus some syntax sugar:
+
+import scala.deriving.Mirror
+
+extension [A <: Product] (from: A)
+  def to[B](using Transformer[A, B]): B = Transformer[A, B].transform(from)
+
+  inline def into[B <: Product](using A: Mirror.ProductOf[A], B: Mirror.ProductOf[B]) = TransformerBuilder.create(from)(using A, B)
+
+Scala
+
+We’ll get into the definition of TransformerBuilder down the line.
+The abstraction
+
+We need to support a certain set of type-level operations to support our use cases and a way to express the notion of fields:
+
+sealed trait Field[Label <: String, Type]
+
+Scala
+
+Please note that no actual runtime instance of this trait will ever be created, it’s just a way for us to abstract over components of a field (its name and type) during compile time. We then need a ‘constructor’ match type for this type, a one that will output a tuple of fields for a given case class:
+
+type FromLabelsAndTypes[Labels <: Tuple, Types <: Tuple] <: Tuple =
+   (Labels, Types) match {
+     case (EmptyTuple, EmptyTuple) => EmptyTuple
+     case (labelHead *: labelTail, typeHead *: typeTail) =>
+       Field[labelHead, typeHead] *: FromLabelsAndTypes[labelTail, typeTail]
+   }
+
+Scala
+
+To construct our Tuple of fields we will need a Mirror, so for a case class Person its Tuple of Fields should be equal to the one we define below:
+
+case class Person(age: Int, name: String)
+
+val mirror = summon[Mirror.ProductOf[Person]]
+
+type Fields = 
+  Field.FromLabelsAndTypes[mirror.MirroredElemLabels, mirror.MirroredElemTypes]
+
+summon[Fields =:= Field["age", Int] *: Field["name", String] *: EmptyTuple]
+
+Scala
+
+Next up is the ability to lookup a type for a Field with a given label, once again expressed with a match type:
+
+type TypeForLabel[Label, Fields <: Tuple] =
+   Fields match {
+     case EmptyTuple                => Nothing
+     case Field[Label, tpe] *: tail => tpe
+     case head *: tail              => TypeForLabel[Label, tail]
+   }
+
+Scala
+
+The usage of which looks like this:
+
+type Fields = Field["name", String] *: Field["age", Int] *: EmptyTuple
+
+summon[TypeForLabel["age", Fields] =:= Int]
+
+summon[TypeForLabel["notExistingLabel", Fields] =:= Nothing]
+
+Scala
+
+You may ask why do we fallback to Nothing in case a field with a given label is not found – the answer is simple, we need a more friendly error message than the generic ‘match type failed to reduce’ which doesn’t really tell the user anything. We can get a nice error message out of it by using an implicit evidence at the call site:
+
+infix type =:!=[A, B] = NotGiven[A =:= B]
+
+type FieldExists[Label, ToSubcases <: Tuple] = Field.TypeForLabel[Label, ToSubcases] =:!= Nothing
+
+Scala
+
+The last type operation we will need is the ability to drop a Field from a Tuple of Fields by specifying its label:
+
+type DropByLabel[Label, Fields <: Tuple] <: Tuple =
+   Fields match {
+     case EmptyTuple                => EmptyTuple
+     case Field[Label, tpe] *: tail => tail
+     case head *: tail              => head *: DropByLabel[Label, tail]
+   }
+
+Scala
+
+With a usage sample:
+
+type Fields = Field["name", String] *: Field["age", Int] *: EmptyTuple
+
+type PersonWithoutAge = Field.DropByLabel["age", Fields]
+
+summon[PersonWithoutAge =:= Field["name", String] *: EmptyTuple]
+
+Scala
+Derivation
+
+If you’ve ever written a JSON/YAML/whatever-parser (who hasn’t, right?) or at the very least used one in Scala 2, you probably wanted some kind of mapping between case classes and the wire format of choice. You probably also wanted to avoid writing these converters by hand and that’s where automatic/semi automatic derivation comes in. It allows us to only supply the bare minimum of converters (eg. for primitives) and lets the compiler handle the rest.
+
+There used to be multiple ways to do it, eg. shapeless, Magnolia and macros (which all of the aforementioned used internally anyway). Thankfully Scala 3 introduced a built-in mechanism for derivation (albeit a very low level one) by using Mirrors and summonInline to summon instances for each member of a case class and then pinky-promising the compiler to only ever use these on a proper runtime value by casting these to wildcards or Any.
+
+Our case will require something a little bit more bespoke, as we can’t rely on the order of fields, we need to go by field names instead:
+
+inline def transformerForField[ToLabel <: String, ToType, FromFields <: Tuple]: (FieldName, Transformer[?, ?]) =
+    inline erasedValue[FromFields] match {
+      case _: EmptyTuple =>
+        error("Transformer not found for field '" + constValue[ToLabel] + "'")
+      case _: (Field[ToLabel, fromType] *: _) =>
+        FieldName.fromLiteralLabel[ToLabel] -> summonInline[Transformer[fromType, ToType]]
+      case _: (_ *: tail) =>
+        transformerForField[ToLabel, ToType, tail]
+    }
+
+Scala
+
+Given a label and a type we’re trying to transform into, we recursively iterate over all the input Fields until we find a Field with the same label. Once we are at this point we can try to summon a Transformer for the source field type to the destination field type or fail with a compile time error. We then need to do this for every single Field in the case class we transform to:
+
+inline def transformersForAllFields[
+    FromFields <: Tuple,
+    ToFields <: Tuple
+  ]: Map[FieldName, Transformer[?, ?]] =
+    inline erasedValue[ToFields] match {
+      case _: EmptyTuple =>
+        Map.empty
+      case _: (Field[label, tpe] *: tail) =>
+        transformersForAllFields[FromFields, tail] + transformerForField[label, tpe, FromFields]
+    }
+
+Scala
+
+One more thing we will need before we can try to transform is the labels of the To type. But how exactly do we obtain them if we don’t have a runtime value of To on hand by that point? The answer is Mirrors. We only need to materialize the type level Tuple of labels we obtain from a Mirror:
+
+inline def labels[Labels <: Tuple]: List[FieldName] =
+    inline erasedValue[Labels] match {
+      case _: EmptyTuple => List.empty
+      case _: (h *: t) => FieldName.make(constValue[h].asInstanceOf[String]) :: labels[t]
+    }
+
+Scala
+
+Now we get to the pinky-promise part. Let’s revise our requirements, to properly construct an instance of the To case class we need:
+
+    transformers for all fields of To,
+    the field labels of To together with their indices,
+    the Mirror of To.
+
+So how do we actually do it? Mirrors have a fromProduct method which accepts any Product as the input and the actual instance of To as the output. Can you see the problem here? It accepts ANY PRODUCT, so we are free to pass an EmptyTuple there and the compiler will be happy to compile it. We need to be extra-extra careful with what we put into this method to not have any runtime surprises awaiting us. Thankfully, the way our derivation works gives us certain guarantees, that is:
+
+    if there is no Transformer instance for any of the fields it will simply not compile,
+    if all the field labels of To are not present in From it will also not compile.
+
+What we’re left with is ensuring the proper order of the values by constructing a Tuple of a desired shape (that is, the length should be equal to the number of fields of To, plus the values should be in the right place index-wise).
+
+Conveniently, the Tuple companion object has a fromArray method we can use. Putting it all together, we define our unsafeConstructInstance method:
+
+inline def unsafeConstructInstance[To](
+    from: Product
+  )(unsafeMapper: (Map[FieldName, ?], FieldName) => ?)(using To: Mirror.ProductOf[To]): To = {
+    val labelsToValuesOfFrom = FieldName.wrapAll(from.productElementNames.zip(from.productIterator).toMap)
+    val labelIndicesOfTo = Derivation.labels[To.MirroredElemLabels].zipWithIndex.toMap
+    val valueArrayOfTo = new Array[Any](labelIndicesOfTo.size)
+    labelIndicesOfTo.foreach { (label, idx) =>
+      val valueForLabel = unsafeMapper(labelsToValuesOfFrom, FieldName.make(label))
+      valueArrayOfTo.update(idx, valueForLabel)
+    }
+    To.fromProduct(Tuple.fromArray(valueArrayOfTo))
+  }
+
+Scala
+
+Now we can define a Transformer instance for a pair of case classes that can be mapped from one to the other:
+
+inline given [A <: Product, B <: Product](using A: Mirror.ProductOf[A], B: Mirror.ProductOf[B]): Transformer[A, B] =
+    new:
+      def transform(from: A): B = {
+        val transformers = Derivation.transformersForAllFields[
+          Field.FromLabelsAndTypes[A.MirroredElemLabels, A.MirroredElemTypes],
+          Field.FromLabelsAndTypes[B.MirroredElemLabels, B.MirroredElemTypes],
+        ]
+
+        Derivation.unsafeConstructInstance(from) { (labelsToValuesOfA, label) =>
+          transformers(label)
+            .asInstanceOf[Transformer[Any, Any]]
+            .transform(labelsToValuesOfA(label))
+        }
+      }
+
+Scala
+
+Which lets us transform between eligible case classes:
+
+case class Person(firstName: String, lastName: String, age: Int)
+
+case class PersonButMoreFields(firstName: String, lastName: String, age: Int, socialSecurityNumber: String)
+
+val personWithMoreFields = PersonButMoreFields("Mark", "Dunk", 23, "SSN-123456")
+
+val fromPersonWithMoreToPerson = personWithMoreFields.to[Person] // Person("Mark", "Dunk", 23)
+
+Scala
+Configurations
+
+
+Now for the best part, we’ll take a deep dive into configurations of our Transformers, starting from a simplified definition of a TransformerBuilder:
+
+final case class TransformerBuilder[
+ From <: Product,
+ To <: Product,
+ FromSubcases <: Tuple,
+ ToSubcases <: Tuple,
+ DerivedFromSubcases <: Tuple,
+ DerivedToSubcases <: Tuple
+] (
+ val appliedTo: From,
+ val computeds: Map[FieldName, From => ?],
+ val constants: Map[FieldName, ?],
+ val renameTransformers: Map[FieldName, RenamedField]
+):
+ def withFieldConst[Label <: String] = ???
+
+ def withFieldComputed[Label <: String] = ???
+
+ inline def withFieldRenamed[FromLabel <: String, ToLabel <: String] = ???
+
+Scala
+
+From the get go, we can see a whopping 6 type parameters, let’s quickly run through them:
+
+    From is our source type,
+    To is the type From will transform to,
+    FromSubcases and ToSubcases will be the typelevel field representation of From and To,
+    DerivedFromSubcases and DerivedToSubcases will hold the type-level representation of Fields for which transformation should be automatically derived.
+
+
+Following the type parameters are the properties: appliedTo, computeds, constants and renameTransformers which will hold the results of our runtime configurations (it’s also where we need to let go of type safety and once again pinky-promise the compiler that, at the end of the day, the types will match and not blow up during runtime).
+
+Now onto the methods themselves. The general idea behind all of these is that we pass in a field label as a String literal and delete the Field labeled with the aforementioned label from the DerivedToSubcases and DerivedFromSubcases type-level tuples. Then once we’re done configuring the Transformer, we can reuse the same derivation mechanism we used when we created automatic transformations and use the configured values to fill in the blanks. With that in mind, we need to ensure type safety ourselves (remember, we pinky-promised the compiler!), so for our most basic operation (withFieldConst) the actual implementation should look like this:
+
+inline def withFieldConst[Label <: String, Value](const: Value)(using
+  @implicitNotFound("${To} doesn't seem to have a field named ${Label}")
+  ev1: FieldExists[Label, ToSubcases],
+  @implicitNotFound("${Value} is not a valid type for field ${Label} in ${To}") 
+  ev2: VerifyTypes[FieldType, Label, ToSubcases]
+): TransformerBuilder[
+     From,
+     To,
+     FromSubcases,
+     ToSubcases,
+     Field.DropByLabel[Label, DerivedFromSubcases],
+     Field.DropByLabel[Label, DerivedToSubcases]
+ ] = this.copy(constants = this.constants + (FieldName.fromLiteralLabel[Label] -> const))
+
+Scala
+
+But there’s a slight issue here.  We want the type of const to be inferred so we can only specify the label. It’s omitted here for brevity, but we can achieve that by using Kinda-Curried Type Parameters (which the actual implementation uses).
+
+As for good error messages, we can rely on the implicitNotFound annotation to provide us with readable errors for our end users (with one exception where it renders literal Strings like that: “literal string”: String. Sadly I couldn’t get it to render nicely without the ‘: String’ suffix and not resort to macros).
+
+A very similar approach is taken for the remaining two configuration methods, so I won’t cover those in that much detail (you can look up the implementation yourself here).
+
+Then, finally we move onto piecing all of this together in the build method, which constructs an instance of a Transformer by taking into account our config:
+
+inline def build(using Mirror.ProductOf[To]): Transformer[From, To] =
+   new:
+     def transform(from: From): To = {
+       val transformers = Derivation.transformersForAllFields[DerivedFromSubcases, DerivedToSubcases]
+
+       Derivation.unsafeConstructInstance[To](from) { (labelsToValuesOfFrom, label) =>
+         def erase(transformer: Transformer[?, ?]) = transformer.asInstanceOf[Transformer[Any, Any]]
+
+         def maybeValueFromRename =
+           renameTransformers
+             .get(label)
+             .map {
+               case RenamedField(fromLabel, transformer) =>
+                 erase(transformer).transform(labelsToValuesOfFrom(fromLabel))
+             }
+
+         def maybeValueFromDerived =
+           transformers
+             .get(label)
+             .map(erase)
+             .map(_.transform(labelsToValuesOfFrom(label)))
+
+         def maybeValueFromComputed =
+           computeds.get(label).map(f => f(from))
+
+         maybeValueFromRename
+           .orElse(maybeValueFromDerived)
+           .orElse(maybeValueFromComputed)
+           .getOrElse(constants(label))
+       }
+     }
+
+Scala
+
+It goes through all the runtime configs and derived transformers to build a valid instance of To. Type safety is assured on a per-case basis inside every configuration method by using implicit evidence and then by using our derivation mechanism for the rest of the fields.
+As a final touch, we introduce the transform method which will let us transform to To once we’re done:
+
+inline def transform(using Mirror.ProductOf[To]): To = build.transform(appliedTo)
+
+Plain text
+Final words and acknowledgments
+
+Scala 3 metaprogramming mechanisms can be used to implement features such as these with (relative) ease and without dabbling with macros.
+
+The idea for this came from my addiction to chimney (really, it’s so good!) and its long standing issue of Scala 3 support where people decided to take matters into their own hands and tried to build a chimney fork for Dotty.
+
+If you are looking for something to hold you over until chimney is actually ported over to Scala 3, I’d like to propose an alternative I’ve built myself (and which is based on the same ideas presented in this blogpost, but this time with a pinch of macros for a better user experience) – ducktape.
+
+Happy transforming!
