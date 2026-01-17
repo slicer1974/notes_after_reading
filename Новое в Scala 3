@@ -116,7 +116,7 @@ import scala.language.implicitConversions
 ```
 
 #TYPES EQUALITY and DIFFERENCE
-In Scala, the standard library contains the little-known type __=:=[A,B]__ (also usable infix as A =:= B) which denotes the “equality” of types A and B. The compiler is able to synthesize instances of =:=[A,A] wherever we have methods requiring an implicit argument or a using clause. In our case, we can write
+In Scala, the standard library contains the little-known type __=:=[A,B]__ (also usable infix as A =:= B) which denotes the __“equality”__ of types A and B. The compiler is able to synthesize instances of =:=[A,A] wherever we have methods requiring an implicit argument or a using clause. In our case, we can write
 
 def processListsSameTypeV3[A, B](la: List[A], lb: List[B])(using A =:= B): List[(A, B)] =
   processLists(la, lb)
@@ -216,7 +216,7 @@ def max[T](x: T, y: T)(implicit ord: Ord[T]): T
 
 in Scala 2. The main difference concerns applications of such parameters. Explicit arguments to parameters of using clauses must be written using (using ...), mirroring the definition syntax. E.g, max(2, 3)(using IntOrd). Scala 2 uses normal applications max(2, 3)(IntOrd) instead. The Scala 2 syntax has some inherent ambiguities and restrictions which are overcome by the new syntax. For instance, multiple implicit parameter lists are not available in the old syntax, even though they can be simulated using auxiliary objects in the "Aux" pattern.
 
-The summon method corresponds to implicitly in Scala 2. It is precisely the same as the the method in Shapeless. The difference between summon (or the) and implicitly is that summon can return a more precise type than the type that was asked for.
+The __summon__ method corresponds to __implicitly__ in Scala 2. The difference between summon (or the) and implicitly is that summon can return a more precise type than the type that was asked for.
 Context Bounds
 
 Context bounds are the same in both language versions. They expand to the respective forms of implicit parameters.

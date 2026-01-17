@@ -1,3 +1,69 @@
+A free monad in Scala is a data structure that allows the representation of a sequence of computations as a pure data structure, independent of their execution. It enables the separation of concerns between defining the structure of a program and providing its interpretation.
+Key Concepts:
+
+    Algebra (or DSL): It begins with defining an "algebra" or a domain-specific language (DSL) that represents the operations of a system as a set of case classes. These operations are typically parameterized by a type constructor F[_], which will later be instantiated with the Free monad.
+
+Код
+
+    sealed trait MyAlgebra[A]
+    case class GetUser(id: Long) extends MyAlgebra[User]
+    case class SaveUser(user: User) extends MyAlgebra[Unit]
+
+    Free Data Structure:
+    The Free monad itself is a recursive data structure, typically defined with two main cases:
+
+    PureA: Represents a completed computation with a final value a.
+
+SuspendF[_], A: Represents a suspended computation, holding a single operation of the F type.
+FlatMapF[_], A, B: Represents a sequential composition of computations.
+
+Program Construction:
+Using Free.liftF (or similar helper functions provided by libraries like Cats or Scalaz), the operations defined in the algebra can be lifted into the Free monad, allowing them to be composed using flatMap and map like any other monad. This creates a "program" as a data structure.
+
+Код
+
+    import cats.free.Free
+    import cats.implicits._ // for liftF
+
+    def program: Free[MyAlgebra, User] =
+      for {
+        user <- Free.liftF(GetUser(123L))
+        _    <- Free.liftF(SaveUser(user.copy(name = "New Name")))
+      } yield user
+
+    Interpreters: An interpreter is a natural transformation (F ~> G) that defines how the operations in the algebra (represented by F) are executed in a concrete context (represented by G, which is typically another monad like IO, Future, or a simple Id for testing).
+
+Код
+
+    import cats.data.EitherK
+    import cats.effect.IO
+
+    val ioInterpreter: MyAlgebra ~> IO = new (MyAlgebra ~> IO) {
+      def apply[A](fa: MyAlgebra[A]): IO[A] = fa match {
+        case GetUser(id) => IO { /* database lookup */ User(id, "Test User") }
+        case SaveUser(user) => IO { /* database save */ println(s"Saving $user") }
+      }
+    }
+
+    Execution: The constructed Free program is then "run" by folding it with an interpreter, which transforms the abstract computation into a concrete one.
+
+Код
+
+    program.foldMap(ioInterpreter).unsafeRunSync()
+
+Benefits of Free Monads:
+
+    Separation of Concerns:
+    Clearly separates the definition of business logic (the program as a data structure) from its execution details (the interpreter).
+    Testability:
+    Allows for easy testing of business logic in isolation using simple interpreters that don't interact with external systems.
+    Flexibility:
+    Enables different interpretations for the same program, such as running against a database, a mock, or even a different execution environment.
+    Stack Safety:
+    Implementations often provide stack-safe recursion through trampolining.
+
+
+Another description:
 The Free monad is a pattern which allows us to separate
 
     the description of fundamental operations
@@ -54,10 +120,10 @@ object FreeMonad {
   }
 ```
 liftM - поднимает монаду во Free
-foldMap - для работы с монадами
+foldMap - operation that can “evaluate” an instance of Free to one of another monadic data types: Option, Try, IO and so on.
 The Pure type simply wraps a single value of type A; we’ll make use of this later when we evaluate foldMap. 
 The FlatMap case class follows the signature of the flatMap method in the Free trait, keeping the Free instance to be transformed and a function to turn an A into another instance of Free[M, B]. 
-The final case class is Suspend which corresponds to the liftM method.
+The final case class is Suspend which corresponds to the liftM method. Free monad has another operation that can “evaluate” an instance of Free to one of these data types. The operation is called foldMap
 
 Сначала мы __определяем__ абстрактную бизнес-логику (типа алгебру), напр.:
 ```
@@ -92,3 +158,175 @@ trait DBOps[A]
   } yield () // description of a computation
 ```
 затем __интерпретируем__ ее, реализуя в конкретной монаде:
+
+  case class IO[A](unsafeRun: () => A)
+  object IO {
+    def create[A](a: => A): IO[A] = IO(() => a)
+  }
+
+  given ioMonad: Monad[IO] with {
+    override def pure[A](a: A) = IO(() => a)
+    override def flatMap[A, B](ma: IO[A])(f: A => IO[B]) =
+      IO(() => f(ma.unsafeRun()).unsafeRun())
+  }
+
+  val myDB: mutable.Map[String, String] = mutable.Map()
+  // TODO replace these with some real serialization
+  def serialize[A](a: A): String = a.toString
+  def deserialize[A](value: String): A = value.asInstanceOf[A]
+
+  // nat trans DBOps -> IO
+  // All we need to do is convert all cases of DBOps into proper IOs that will perform effects on the database when evaluated
+  val dbOps2IO: DBOps ~> IO = new (DBOps ~> IO) {
+    override def apply[A](fa: DBOps[A]): IO[A] = fa match {
+      case Create(key, value) => IO.create { // actual code that uses the database
+        println(s"insert into people(id, name) values ($key, $value)")
+        myDB += (key -> serialize(value))
+        ()
+      }
+      case Read(key) => IO.create {
+        println(s"select * from people where id=$key limit 1")
+        deserialize(myDB(key))
+      }
+      case Update(key, value) => IO.create {
+        println(s"update people(name=$value) where id=$key")
+        val oldValue = myDB(key)
+        myDB += (key -> serialize(value))
+        deserialize(oldValue)
+      }
+      case Delete(key) => IO.create {
+        println(s"delete from people where id=$key")
+        ()
+      }
+    }
+  }
+
+  val ioProgram: IO[Unit] = myLittleProgram.foldMap(dbOps2IO)
+
+  def main(args: Array[String]): Unit = {
+    ioProgram.unsafeRun() // PERFORMS THE ACTUAL WORK
+  }
+}
+
+__Итоговый код:__
+
+//@@@@@@@@@@@@@@@@@@@@Free Monad
+
+object FreeMonad {
+ trait Monad[M[_]] {
+    def pure[A](a: A): M[A]
+    def flatMap[A, B](ma: M[A])(f: A => M[B]): M[B]
+  }
+
+ object Monad {
+    def apply[M[_]](using monad: Monad[M]): Monad[M] = monad
+  }
+
+ trait ~>[F[_], G[_]] {
+    def apply[A](fa: F[A]): G[A]
+  }
+
+ trait Free[M[_], A] {
+    import Free.*
+    def flatMap[B](f: A => Free[M, B]): Free[M, B] = FlatMap(this, f)
+    def map[B](f: A => B): Free[M, B] = flatMap(a => pure(f(a)))
+    def foldMap[G[_]: Monad](natTrans: M ~> G): G[A] = this match {
+      case Pure(a) => Monad[G].pure(a)
+      case Suspend(ma) => natTrans.apply(ma)
+      case FlatMap(fa, f) => // need a G[B]
+        Monad[G].flatMap(fa.foldMap(natTrans))(a =>     f(a)      .foldMap(natTrans) )
+    }
+  }
+
+  object Free {
+    def pure[M[_], A](a: A): Free[M, A] = Pure(a)
+    def liftM[M[_], A](ma: M[A]): Free[M, A] = Suspend(ma)
+
+    case class Pure[M[_], A](a: A) extends Free[M, A]
+    case class FlatMap[M[_],A,B](fa: Free[M, A], f: A => Free[M, B]) extends Free[M, B]
+    case class Suspend[M[_], A](ma: M[A]) extends Free[M, A]
+  }
+
+  // sequence computations as data structures, THEN attach the monadic type at the end
+  //@@@@@@@@@@@@@@@@@@@@"algebra"
+
+  trait DBOps[A]
+  case class Create[A](key: String, value: A) extends DBOps[Unit]
+  case class Read[A](key: String) extends DBOps[A]
+  case class Update[A](key: String, value: A) extends DBOps[A]
+  case class Delete(key: String) extends DBOps[Unit]
+
+  // definitions - fancier algebra
+  type DBMonad[A] = Free[DBOps, A]
+
+  // "smart" constructors
+  def create[A](key: String, value: A): DBMonad[Unit] =
+    Free.liftM[DBOps, Unit](Create(key, value))
+  def get[A](key: String): DBMonad[A] =
+    Free.liftM[DBOps, A](Read[A](key))
+  def update[A](key: String, value: A): DBMonad[A] =
+    Free.liftM[DBOps, A](Update[A](key, value))
+  def delete(key: String): DBMonad[Unit] =
+    Free.liftM(Delete(key))
+
+  
+  //@@@@@@@@@@@@@@@@@@@@business logic is FIXED
+
+  def myLittleProgram: DBMonad[Unit] = for { // monadic
+    _ <- create[String]("123-456", "Daniel")
+    name <- get[String]("123-456")
+    _ <- create[String]("567", name.toUpperCase())
+    _ <- delete("123-456")
+  } yield () // description of a computation
+
+  
+  // evaluate the program - interpreter/"compiler"
+  //@@@@@@@@@@@@@@@@@@@@IO
+
+  case class IO[A](unsafeRun: () => A)
+  object IO {
+    def create[A](a: => A): IO[A] = IO(() => a)
+  }
+
+  given ioMonad: Monad[IO] with {
+    override def pure[A](a: A) = IO(() => a)
+    override def flatMap[A, B](ma: IO[A])(f: A => IO[B]) =
+      IO(() => f(ma.unsafeRun()).unsafeRun())
+  }
+
+  val myDB: mutable.Map[String, String] = mutable.Map()
+  // TODO replace these with some real serialization
+  def serialize[A](a: A): String = a.toString
+  def deserialize[A](value: String): A = value.asInstanceOf[A]
+
+  // nat trans DBOps -> IO
+  val dbOps2IO: DBOps ~> IO = new (DBOps ~> IO) {
+    override def apply[A](fa: DBOps[A]): IO[A] = fa match {
+      case Create(key, value) => IO.create { // actual code that uses the database
+        println(s"insert into people(id, name) values ($key, $value)")
+        myDB += (key -> serialize(value))
+        ()
+      }
+      case Read(key) => IO.create {
+        println(s"select * from people where id=$key limit 1")
+        deserialize(myDB(key))
+      }
+      case Update(key, value) => IO.create {
+        println(s"update people(name=$value) where id=$key")
+        val oldValue = myDB(key)
+        myDB += (key -> serialize(value))
+        deserialize(oldValue)
+      }
+      case Delete(key) => IO.create {
+        println(s"delete from people where id=$key")
+        ()
+      }
+    }
+  }
+
+  val ioProgram: IO[Unit] = myLittleProgram.foldMap(dbOps2IO)
+
+  def main(args: Array[String]): Unit = {
+    ioProgram.unsafeRun() // PERFORMS THE ACTUAL WORK
+  }
+}
